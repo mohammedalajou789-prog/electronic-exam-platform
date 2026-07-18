@@ -1,26 +1,152 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
+@custom-variant dark (&:is(.dark *));
+
+/* ── shadcn/ui tokens ── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: 0 0% 100%;
+  --foreground: 224 71.4% 4.1%;
+  --card: 0 0% 100%;
+  --card-foreground: 224 71.4% 4.1%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 224 71.4% 4.1%;
+  --primary: 220.9 39.3% 11%;
+  --primary-foreground: 210 20% 98%;
+  --secondary: 220 14.3% 95.9%;
+  --secondary-foreground: 220.9 39.3% 11%;
+  --muted: 220 14.3% 95.9%;
+  --muted-foreground: 220 8.9% 46.1%;
+  --accent: 220 14.3% 95.9%;
+  --accent-foreground: 220.9 39.3% 11%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 210 20% 98%;
+  --border: 220 13% 91%;
+  --input: 220 13% 91%;
+  --ring: 224 71.4% 4.1%;
+  --radius: 0.5rem;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+.dark {
+  --background: 224 71.4% 4.1%;
+  --foreground: 210 20% 98%;
+  --card: 224 71.4% 4.1%;
+  --card-foreground: 210 20% 98%;
+  --popover: 224 71.4% 4.1%;
+  --popover-foreground: 210 20% 98%;
+  --primary: 210 20% 98%;
+  --primary-foreground: 220.9 39.3% 11%;
+  --secondary: 215 27.9% 16.9%;
+  --secondary-foreground: 210 20% 98%;
+  --muted: 215 27.9% 16.9%;
+  --muted-foreground: 217.9 10.6% 64.9%;
+  --accent: 215 27.9% 16.9%;
+  --accent-foreground: 210 20% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 210 20% 98%;
+  --border: 215 27.9% 16.9%;
+  --ring: 216 12.2% 83.9%;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* ── Design tokens ── */
+:root {
+  --bg:             oklch(98% 0.006 55);
+  --bg-elev:        oklch(100% 0 0);
+  --bg-soft:        oklch(96% 0.009 55);
+  --fg:             oklch(22% 0.02 50);
+  --fg-muted:       oklch(46% 0.02 50);
+  --bd:             oklch(89% 0.012 50);
+  --clr-primary:    oklch(50% 0.19 25);
+  --clr-soft:       oklch(94% 0.035 25);
+  --shadow:         rgba(20, 10, 10, 0.08);
+  --primary:        oklch(50% 0.19 25);
+  --primary-soft:   oklch(94% 0.035 25);
+  --accent-green:   #22c55e;
+  --accent-blue:    #3b82f6;
+  --accent-purple:  #a855f7;
+  --accent-orange:  #f97316;
 }
 
+.dark {
+  --bg:             oklch(18% 0.01 50);
+  --bg-elev:        oklch(22% 0.012 50);
+  --bg-soft:        oklch(20% 0.01 50);
+  --fg:             oklch(92% 0.008 50);
+  --fg-muted:       oklch(62% 0.015 50);
+  --bd:             oklch(32% 0.015 50);
+  --clr-primary:    oklch(68% 0.18 25);
+  --clr-soft:       oklch(28% 0.06 25);
+  --shadow:         rgba(0, 0, 0, 0.3);
+  --primary:        oklch(68% 0.18 25);
+  --primary-soft:   oklch(28% 0.06 25);
+  --accent-green:   #4ade80;
+  --accent-blue:    #60a5fa;
+  --accent-purple:  #c084fc;
+  --accent-orange:  #fb923c;
+}
+
+/* ── Animations ── */
+@keyframes heartbeatPulse {
+  0%, 100% { transform: scale(1); }
+  45%      { transform: scale(1.08); }
+  55%      { transform: scale(1.08); }
+}
+@keyframes ambientBreathe {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 0.55; }
+}
+@keyframes ecgGlowMove {
+  0%   { left: -15%; }
+  100% { left: 115%; }
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes spinIcon {
+  from { transform: rotate(-20deg) scale(0.8); opacity: 0; }
+  to   { transform: rotate(0) scale(1); opacity: 1; }
+}
+
+/* ── Base ── */
+* {
+  box-sizing: border-box;
+  border-color: hsl(var(--border));
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+::selection {
+  background: var(--clr-soft);
+  color: var(--clr-primary);
+}
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+/* ── Shared UI classes ── */
+.year-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--bd);
+  border-radius: 18px;
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  text-decoration: none;
+  color: inherit;
+  transition: transform 0.2s, box-shadow 0.2s;
+  opacity: 0;
+  animation: fadeInUp 0.5s ease-out forwards;
+}
+.year-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px var(--shadow);
 }
