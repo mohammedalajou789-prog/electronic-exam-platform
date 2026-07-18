@@ -2,7 +2,7 @@
 import { notFound } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { ChevronRight } from 'lucide-react'
-import type { AcademicYear, Semester, Subject } from '@/types/database'
+
 
 interface PageProps {
   params: Promise<{ year: string; semester: string }>
@@ -18,53 +18,51 @@ function slugToName(slug: string): string {
 async function getSemesterWithSubjects(
   yearSlug: string,
   semesterSlug: string
-): Promise<{
-  academicYear: AcademicYear
-  semester: Semester
-  subjects: (Subject & { examCount: number; questionCount: number })[]
-} | null> {
+) {
   const supabase = await createServerSupabaseClient()
 
-  const yearName = slugToName(yearSlug)
+  const yearName     = slugToName(yearSlug)
   const semesterName = slugToName(semesterSlug)
 
-  const { data: academicYear, error: yearError } = await supabase
-    .from('academic_years').select('*').eq('name', yearName).single()
-  if (yearError || !academicYear) return null
+  const { data: academicYear } = await supabase
+    .from('academic_years')
+    .select(`
+      *,
+      semesters!inner(
+        *,
+        subjects(
+          *,
+          batches(
+            id,
+            exams(id, question_count)
+          )
+        )
+      )
+    `)
+    .eq('name', yearName)
+    .eq('semesters.name', semesterName)
+    .single()
 
-  const { data: semester, error: semesterError } = await supabase
-    .from('semesters').select('*')
-    .eq('academic_year_id', academicYear.id)
-    .eq('name', semesterName).single()
-  if (semesterError || !semester) return null
+  if (!academicYear) return null
 
-  const { data: subjects, error: subjectsError } = await supabase
-    .from('subjects').select('*')
-    .eq('semester_id', semester.id)
-    .order('display_order', { ascending: true })
-  if (subjectsError) return null
+  const semester = academicYear.semesters?.[0]
+  if (!semester) return null
 
-  const subjectsWithCounts = await Promise.all(
-    (subjects || []).map(async (subject) => {
-      const { data: batches } = await supabase
-        .from('batches').select('id').eq('subject_id', subject.id)
-      const batchIds = (batches || []).map((b: { id: string }) => b.id)
-
-      let examCount = 0
-      let questionCount = 0
-
-      if (batchIds.length > 0) {
-        const { data: exams } = await supabase
-          .from('exams').select('id, question_count').in('batch_id', batchIds)
-        examCount = exams?.length || 0
-        questionCount = exams?.reduce((sum: number, e: { question_count: number }) => sum + (e.question_count || 0), 0) || 0
+  const subjects = (semester.subjects ?? [])
+    .sort((a: { display_order: number }, b: { display_order: number }) => a.display_order - b.display_order)
+    .map((subject: {
+      batches?: { exams?: { id: string; question_count: number }[] }[]
+      [key: string]: unknown
+    }) => {
+      const allExams = (subject.batches ?? []).flatMap(b => b.exams ?? [])
+      return {
+        ...subject,
+        examCount:     allExams.length,
+        questionCount: allExams.reduce((sum, e) => sum + (e.question_count ?? 0), 0),
       }
-
-      return { ...subject, examCount, questionCount }
     })
-  )
 
-  return { academicYear, semester, subjects: subjectsWithCounts }
+  return { academicYear, semester, subjects }
 }
 
 export default async function SemesterPage({ params }: PageProps) {
@@ -99,7 +97,7 @@ export default async function SemesterPage({ params }: PageProps) {
         {/* Subject Cards */}
         {subjects.length > 0 ? (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 16 }}>
-            {subjects.map((subject, index) => (
+            {subjects.map((subject: { id: string; name: string; examCount: number; questionCount: number; display_order: number }, index: number) => (
               <Link
                 key={subject.id}
                 href={`/${year}/${semester}/${subject.name.toLowerCase().replace(/\s+/g, '-')}`}
