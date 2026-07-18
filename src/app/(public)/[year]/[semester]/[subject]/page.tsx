@@ -15,67 +15,85 @@ function slugToName(slug: string): string {
 async function getSubjectData(yearSlug: string, semesterSlug: string, subjectSlug: string) {
   const supabase = await createServerSupabaseClient()
 
-  const yearName = slugToName(yearSlug)
+  const yearName     = slugToName(yearSlug)
   const semesterName = slugToName(semesterSlug)
 
+  // query واحد يجيب كل شيء
   const { data: academicYear } = await supabase
-    .from('academic_years').select('*').eq('name', yearName).single()
+    .from('academic_years')
+    .select(`
+      *,
+      semesters!inner(
+        *,
+        subjects(
+          *,
+          batches(
+            *,
+            exams(id, question_count, doctor_id, status, deleted_at)
+          )
+        )
+      )
+    `)
+    .eq('name', yearName)
+    .eq('semesters.name', semesterName)
+    .single()
+
   if (!academicYear) return null
 
-  const { data: semester } = await supabase
-    .from('semesters').select('*')
-    .eq('academic_year_id', academicYear.id).eq('name', semesterName).single()
+  const semester = academicYear.semesters?.[0]
   if (!semester) return null
 
-  const { data: subjects } = await supabase
-    .from('subjects').select('*').eq('semester_id', semester.id)
-  if (!subjects) return null
-
-  const subject = subjects.find(s =>
-    s.name.toLowerCase().replace(/\s+/g, '-') === subjectSlug
+  const subject = (semester.subjects ?? []).find(
+    (s: { name: string }) => s.name.toLowerCase().replace(/\s+/g, '-') === subjectSlug
   )
   if (!subject) return null
 
-  const { data: batches } = await supabase
-    .from('batches').select('*').eq('subject_id', subject.id).order('display_order')
-
-  const batchesWithCounts = await Promise.all(
-    (batches || []).map(async batch => {
-      const { count: examCount } = await supabase
-        .from('exams').select('*', { count: 'exact', head: true })
-        .eq('batch_id', batch.id).eq('status', 'published').is('deleted_at', null)
-      const { data: exams } = await supabase
-        .from('exams').select('question_count')
-        .eq('batch_id', batch.id).eq('status', 'published').is('deleted_at', null)
-      const totalQuestions = (exams || []).reduce((sum: number, e: { question_count: number }) => sum + (e.question_count || 0), 0)
-      return { ...batch, examCount: examCount || 0, totalQuestions }
+  // حساب الإحصائيات من البيانات المجلوبة
+  const batches = (subject.batches ?? [])
+    .sort((a: { display_order: number }, b: { display_order: number }) => a.display_order - b.display_order)
+    .map((batch: { exams?: { id: string; question_count: number; doctor_id: string; status: string; deleted_at: string | null }[]; [key: string]: unknown }) => {
+      const publishedExams = (batch.exams ?? []).filter(e => e.status === 'published' && !e.deleted_at)
+      return {
+        ...batch,
+        examCount:      publishedExams.length,
+        totalQuestions: publishedExams.reduce((sum, e) => sum + (e.question_count ?? 0), 0),
+      }
     })
+
+  const totalExams     = batches.reduce((sum: number, b: { examCount: number }) => sum + b.examCount, 0)
+  const totalQuestions = batches.reduce((sum: number, b: { totalQuestions: number }) => sum + b.totalQuestions, 0)
+
+  // جمع doctor IDs من الـ exams
+  const allExams = batches.flatMap((b: { exams?: { id: string; doctor_id: string; status: string; deleted_at: string | null }[] }) =>
+    (b.exams ?? []).filter((e: { status: string; deleted_at: string | null }) => e.status === 'published' && !e.deleted_at)
   )
+  const doctorIds = [...new Set(allExams.map((e: { doctor_id: string }) => e.doctor_id).filter(Boolean))] as string[]
+  const examIds   = allExams.map((e: { id: string }) => e.id) as string[]
 
-  const totalExams = batchesWithCounts.reduce((sum, b) => sum + b.examCount, 0)
-  const totalQuestions = batchesWithCounts.reduce((sum, b) => sum + b.totalQuestions, 0)
+  // جلب الدكاترة والـ chapters/lectures بالتوازي
+  const [doctorsRes, questionMetaRes] = await Promise.all([
+    doctorIds.length > 0
+      ? supabase.from('doctors').select('id, name').in('id', doctorIds)
+      : Promise.resolve({ data: [] }),
+    examIds.length > 0
+      ? supabase.from('questions').select('chapter, lecture').in('exam_id', examIds).is('deleted_at', null)
+      : Promise.resolve({ data: [] }),
+  ])
 
-  const allExamIds = (await supabase
-    .from('exams').select('id, doctor_id')
-    .in('batch_id', (batches || []).map(b => b.id))
-    .eq('status', 'published').is('deleted_at', null)
-  ).data || []
+  const chapters = [...new Set((questionMetaRes.data ?? []).map((q: { chapter: string }) => q.chapter).filter(Boolean))] as string[]
+  const lectures = [...new Set((questionMetaRes.data ?? []).map((q: { lecture: string }) => q.lecture).filter(Boolean))] as string[]
 
-  const doctorIds = [...new Set(allExamIds.map((e: { doctor_id: string }) => e.doctor_id).filter(Boolean))]
-  const { data: doctors } = await supabase
-    .from('doctors').select('id, name')
-    .in('id', doctorIds.length > 0 ? doctorIds : ['00000000-0000-0000-0000-000000000000'])
-
-  const examIds = allExamIds.map((e: { id: string }) => e.id)
-  const { data: questionMeta } = examIds.length > 0
-    ? await supabase.from('questions').select('chapter, lecture')
-        .in('exam_id', examIds).is('deleted_at', null)
-    : { data: [] }
-
-  const chapters = [...new Set((questionMeta || []).map((q: { chapter: string }) => q.chapter).filter(Boolean))] as string[]
-  const lectures = [...new Set((questionMeta || []).map((q: { lecture: string }) => q.lecture).filter(Boolean))] as string[]
-
-  return { academicYear, semester, subject, batches: batchesWithCounts, totalExams, totalQuestions, doctors: doctors || [], chapters, lectures }
+  return {
+    academicYear,
+    semester,
+    subject,
+    batches,
+    totalExams,
+    totalQuestions,
+    doctors: doctorsRes.data ?? [],
+    chapters,
+    lectures,
+  }
 }
 
 export default async function SubjectPage({ params }: PageProps) {
@@ -116,7 +134,7 @@ export default async function SubjectPage({ params }: PageProps) {
         <div style={{ background: 'var(--bg-elev)', border: '1px solid var(--bd)', borderRadius: 18, marginBottom: 24, overflow: 'hidden' }}>
           <CustomExamBuilder
             subjectId={subject.id}
-            batches={batches.map(b => ({ id: b.id, name: b.name }))}
+            batches={batches.map((b: { id: string; name: string }) => ({ id: b.id, name: b.name }))}
             doctors={doctors}
             chapters={chapters}
             lectures={lectures}
@@ -130,7 +148,7 @@ export default async function SubjectPage({ params }: PageProps) {
         {/* Batch Cards */}
         {batches.length > 0 ? (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
-            {batches.map((batch, index) => (
+            {batches.map((batch: { id: string; name: string; examCount: number; totalQuestions: number }, index: number) => (
               <Link
                 key={batch.id}
                 href={`${basePath}/${batch.name.toLowerCase().replace(/\s+/g, '-')}`}
