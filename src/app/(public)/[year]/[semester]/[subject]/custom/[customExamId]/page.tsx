@@ -39,7 +39,7 @@ export default async function CustomExamPlayPage({ params }: PageProps) {
     title: 'Custom Exam',
     question_count: questions.length,
     duration_minutes: null,
-    timer_mode: 'none',
+    timer_mode: 'none' as const,
   }
 
   return (
