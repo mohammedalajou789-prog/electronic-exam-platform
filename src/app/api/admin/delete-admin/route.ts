@@ -1,7 +1,6 @@
 ﻿export const runtime = 'nodejs'
 import { NextRequest, NextResponse } from 'next/server'
 
-export const runtime = 'nodejs'
 import { createClient } from '@supabase/supabase-js'
 
 const adminSupabase = createClient(
