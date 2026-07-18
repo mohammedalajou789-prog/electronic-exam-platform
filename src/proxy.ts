@@ -1,12 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-// Pages regular admins (non-super) are allowed to access
-const ADMIN_ALLOWED_PATHS = [
-  '/admin/import',
-  '/admin/manual-import',
-]
-
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
@@ -15,7 +9,9 @@ export async function proxy(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll() { return request.cookies.getAll() },
+        getAll() {
+          return request.cookies.getAll()
+        },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) => {
             supabaseResponse.cookies.set(name, value, options)
@@ -26,6 +22,7 @@ export async function proxy(request: NextRequest) {
   )
 
   const { data: { user } } = await supabase.auth.getUser()
+
   const pathname = request.nextUrl.pathname
 
   // Allow admin login page without authentication
@@ -36,7 +33,7 @@ export async function proxy(request: NextRequest) {
   // Protect /admin routes
   if (pathname.startsWith('/admin')) {
     if (!user) {
-      return NextResponse.redirect(new URL('/admin/login', request.url))
+      return NextResponse.redirect(new URL('/login/admin', request.url))
     }
 
     const { data: admin } = await supabase
@@ -46,15 +43,7 @@ export async function proxy(request: NextRequest) {
       .single()
 
     if (!admin) {
-      return NextResponse.redirect(new URL('/admin/login', request.url))
-    }
-
-    // Regular admin — only allowed on import pages
-    if (admin.role === 'admin') {
-      const isAllowed = ADMIN_ALLOWED_PATHS.some(p => pathname.startsWith(p))
-      if (!isAllowed) {
-        return NextResponse.redirect(new URL('/admin/import', request.url))
-      }
+      return NextResponse.redirect(new URL('/login/admin', request.url))
     }
   }
 
