@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
@@ -122,8 +122,8 @@ export default function RegisterPage() {
       </div>
 
       {/* ── Right panel ── */}
-      <div style={{ flex: '1 1 0%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 48px', background: 'var(--bg)', overflowY: 'auto', height: '100vh' }}>
-        <div style={{ width: '100%', maxWidth: 420 }}>
+      <div style={{ flex: '1 1 0%', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'flex-start', padding: '40px 48px', background: 'var(--bg)', overflowY: 'auto', height: '100vh' }}>
+        <div style={{ width: '100%', maxWidth: 420, margin: '0 auto', paddingTop: 20 }}>
 
           <div style={{ marginBottom: 32 }}>
             <h1 style={{ margin: '0 0 8px', fontSize: 28, fontWeight: 800, color: 'var(--fg)' }}>Create your account</h1>
@@ -202,4 +202,3 @@ export default function RegisterPage() {
     </div>
   )
 }
-

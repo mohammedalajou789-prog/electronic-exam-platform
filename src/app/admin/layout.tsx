@@ -1,4 +1,5 @@
-﻿import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
 import AdminSidebar from '@/components/admin/AdminSidebar'
 
 export default async function AdminLayout({
@@ -11,7 +12,7 @@ export default async function AdminLayout({
 
   // No user — show login page without sidebar
   if (!user) {
-    return <>{children}</>
+    redirect('/login')
   }
 
   // Get admin role
@@ -34,4 +35,3 @@ export default async function AdminLayout({
     </div>
   )
 }
-
