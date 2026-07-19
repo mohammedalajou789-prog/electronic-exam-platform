@@ -12,8 +12,12 @@ export const metadata: Metadata = {
   title: 'Medical Club — Exam Platform',
   description: 'The easiest way to practice previous medical examinations',
   icons: {
-    icon: '/images/logo.jpg',
-    apple: '/images/logo.jpg',
+    icon: [
+      { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
+      { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
+      { url: '/favicon.ico' },
+    ],
+    apple: '/apple-touch-icon.png',
   },
 }
 
