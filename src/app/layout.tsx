@@ -11,6 +11,10 @@ const plusJakarta = Plus_Jakarta_Sans({
 export const metadata: Metadata = {
   title: 'Medical Club — Exam Platform',
   description: 'The easiest way to practice previous medical examinations',
+  icons: {
+    icon: '/images/logo.jpg',
+    apple: '/images/logo.jpg',
+  },
 }
 
 export default function RootLayout({
