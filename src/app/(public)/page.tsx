@@ -31,7 +31,7 @@ export default async function HomePage() {
   ]
 
   return (
-    <div style={{ fontFamily: 'Inter, system-ui, sans-serif', background: 'var(--bg)', minHeight: '100vh', color: 'var(--fg)' }}>
+    <div style={{ fontFamily: 'Inter, system-ui, sans-serif', background: 'var(--bg)', color: 'var(--fg)' }}>
       <style>{`
         @keyframes floatY { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)} }
         @keyframes glow   { 0%,100%{opacity:.55} 50%{opacity:.9} }
