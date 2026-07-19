@@ -107,8 +107,8 @@ export default async function SubjectPage({ params }: PageProps) {
   const basePath = `/${year}/${semester}/${subjectSlug}`
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)', fontFamily: '"Plus Jakarta Sans", system-ui, sans-serif' }}>
-      <main style={{ maxWidth: 1180, margin: '0 auto', padding: '32px 24px 80px', animation: '0.45s ease-out 0s 1 normal none running fadeSlideIn' }}>
+    <div style={{ background: 'var(--bg)', color: 'var(--fg)', fontFamily: '"Plus Jakarta Sans", system-ui, sans-serif' }}>
+  <main style={{ maxWidth: 1180, margin: '0 auto', padding: '32px 24px 24px', animation: '0.45s ease-out 0s 1 normal none running fadeSlideIn' }}>
 
         {/* Breadcrumb */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', fontSize: 13, color: 'var(--fg-muted)', marginBottom: 18 }}>

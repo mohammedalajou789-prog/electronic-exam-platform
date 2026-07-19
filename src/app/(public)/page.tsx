@@ -169,7 +169,7 @@ export default async function HomePage() {
               <div style={{ position:'absolute', width:340, height:340, borderRadius:'50%', background:'radial-gradient(circle, rgba(196,18,48,0.14), transparent 72%)', animation:'glow 4s ease-in-out infinite' }} />
               <div style={{ position:'absolute', width:300, height:300, border:'1.5px dashed var(--bd)', borderRadius:'50%' }} />
               <div style={{ position:'relative', filter:'drop-shadow(rgba(196,18,48,0.14) 0px 18px 36px)' }}>
-                <img src="/images/logo.jpg" alt="Medical Club logo"
+                <img className="hero-logo-img" src="/images/logo.jpg" alt="Medical Club logo"
                   style={{ width:230, height:230, display:'block', objectFit:'contain', borderRadius:'50%' }} />
               </div>
               <div className="float-badge-top">

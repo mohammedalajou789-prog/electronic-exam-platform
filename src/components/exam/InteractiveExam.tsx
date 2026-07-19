@@ -304,7 +304,7 @@ export default function InteractiveExam({ exam, questions, savedProgress }: Prop
     const imgUrl = currentQ.question_images?.[0]?.image_url
 
     return (
-      <div style={{ [rootStyle as unknown as string]: '', minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)', fontFamily: "'Plus Jakarta Sans',system-ui,sans-serif" } as React.CSSProperties}>
+      <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)', fontFamily: "'Plus Jakarta Sans',system-ui,sans-serif" } as React.CSSProperties}>
         <style>{`
           @keyframes examFadeIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
           @keyframes noteSlide{from{opacity:0;max-height:0}to{opacity:1;max-height:120px}}
@@ -314,9 +314,10 @@ export default function InteractiveExam({ exam, questions, savedProgress }: Prop
           @keyframes modalPop{from{opacity:0;transform:translateY(8px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
           * { box-sizing: border-box; }
           button { font-family: inherit; }
+          :root { ${rootStyle} }
         `}</style>
         {Header}
-        <main style={{ maxWidth: 1180, margin: '0 auto', padding: '32px 24px 80px' }}>
+        <main className="exam-main" style={{ maxWidth: 1180, margin: '0 auto', padding: '32px 24px 80px' }}>
           {/* Counter */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
             <div style={{ fontSize: 13.5, color: 'var(--fg-muted)', fontWeight: 700 }}>
@@ -325,7 +326,7 @@ export default function InteractiveExam({ exam, questions, savedProgress }: Prop
           </div>
 
           {/* Question Card */}
-          <div style={{ background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 18, padding: 24, boxShadow: '0 1px 3px var(--shadow)', animation: 'examFadeIn .3s ease' }}>
+          <div className="exam-card" style={{ background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 18, padding: 24, boxShadow: '0 1px 3px var(--shadow)', animation: 'examFadeIn .3s ease' }}>
             {/* Meta row */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
               <span style={{ width: 26, height: 26, borderRadius: 8, background: 'var(--primary-soft)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12.5, fontWeight: 800, flexShrink: 0 }}>{current + 1}</span>
@@ -343,7 +344,7 @@ export default function InteractiveExam({ exam, questions, savedProgress }: Prop
             </div>
 
             {/* Question text */}
-            <div style={{ fontSize: 19, fontWeight: 700, color: 'var(--fg)', lineHeight: 1.6, letterSpacing: -0.1, marginBottom: 18 }}>{currentQ.question_text}</div>
+            <div className="exam-q-text" style={{ fontSize: 19, fontWeight: 700, color: 'var(--fg)', lineHeight: 1.6, letterSpacing: -0.1, marginBottom: 18 }}>{currentQ.question_text}</div>
 
             {/* Image */}
             {imgUrl && <div style={{ marginBottom: 16, borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border)' }}><img src={imgUrl} alt="Question" style={{ width: '100%', maxHeight: 360, objectFit: 'contain', display: 'block' }} /></div>}
@@ -373,7 +374,7 @@ export default function InteractiveExam({ exam, questions, savedProgress }: Prop
           </div>
 
           {/* Action bar */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 18, gap: 12, flexWrap: 'wrap' }}>
+          <div className="exam-actions" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 18, gap: 12, flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', gap: 10 }}>
               <button style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '11px 16px', borderRadius: 12, border: '1px solid var(--primary)', background: 'color-mix(in srgb, var(--primary) 12%, var(--bg-elev))', color: 'var(--primary)', fontWeight: 700, fontSize: 13.5, cursor: 'pointer' }}
                 onClick={() => setReportOpen(true)}>

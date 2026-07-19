@@ -125,10 +125,15 @@ a {
   background: var(--clr-soft);
   color: var(--clr-primary);
 }
-body {
+html, body {
   margin: 0;
-  background-color: hsl(var(--background));
-  color: hsl(var(--foreground));
+  min-height: 100%;
+  background-color: var(--bg);
+  color: var(--fg);
+}
+
+html {
+  background-color: var(--bg);
 }
 
 /* ── Shared UI classes ── */
@@ -149,4 +154,11 @@ body {
 .year-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 8px 24px var(--shadow);
+}
+* {
+  max-width: 100%;
+}
+
+html, body {
+  overflow-x: hidden;
 }
