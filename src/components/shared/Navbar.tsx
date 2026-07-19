@@ -150,7 +150,7 @@ export default function Navbar() {
                 className="flex items-center gap-1.5 rounded-[10px] px-3.5 py-2 text-[13.5px] font-bold no-underline"
                 style={{ background: 'var(--clr-primary)', color: '#ffffff' }}
               >
-                ? Admin Panel
+                Admin Panel 
               </Link>
             )}
             {!isAdmin && (
