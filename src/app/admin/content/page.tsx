@@ -1,115 +1,100 @@
 ﻿'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Plus, Trash2, BookOpen, Users, Stethoscope, ChevronDown, ChevronRight } from 'lucide-react'
+import {
+  Plus, Trash2, ChevronDown, ChevronRight,
+  BookOpen, Users, Stethoscope, GraduationCap,
+  X, Check, Loader2
+} from 'lucide-react'
+
+// ── Types ────────────────────────────────────────────────────────────────────
 
 interface AcademicYear { id: string; name: string; is_clinical: boolean }
-interface Semester { id: string; name: string; academic_year_id: string }
-interface Subject { id: string; name: string; description: string | null; semester_id: string | null; year_id: string | null }
+interface Semester     { id: string; name: string; academic_year_id: string }
+interface Doctor       { id: string; name: string; department: string | null }
+interface Lecture      { id: string; name: string; display_order: number }
+interface Chapter      { id: string; name: string; display_order: number; lectures: Lecture[] }
+interface SubjectDoctor { id: string; doctor_id: string; doctor: { name: string; department: string | null } | { name: string; department: string | null }[] }
+
+interface Subject {
+  id: string
+  name: string
+  description: string | null
+  semester_id: string | null
+  year_id: string | null
+  subject_doctors: SubjectDoctor[]
+  chapters: (Chapter & { lectures: Lecture[] })[]
+  batches: { id: string; name: string }[]
+}
+
 interface Batch { id: string; name: string; subject_id: string }
-interface Doctor { id: string; name: string; department: string | null }
-interface Chapter { id: string; name: string; subject_id: string; display_order: number }
-interface Lecture { id: string; name: string; chapter_id: string; display_order: number }
+
+// ── Main Component ────────────────────────────────────────────────────────────
 
 export default function ContentManagementPage() {
   const supabase = createClient()
-  const [activeTab, setActiveTab] = useState<'subjects' | 'batches' | 'doctors' | 'chapters'>('subjects')
 
+  const [activeTab, setActiveTab] = useState<'subjects' | 'batches'>('subjects')
   const [academicYears, setAcademicYears] = useState<AcademicYear[]>([])
   const [semesters, setSemesters] = useState<Semester[]>([])
+  const [allDoctors, setAllDoctors] = useState<Doctor[]>([])
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [batches, setBatches] = useState<Batch[]>([])
-  const [doctors, setDoctors] = useState<Doctor[]>([])
-  const [chapters, setChapters] = useState<Chapter[]>([])
-  const [lectures, setLectures] = useState<Lecture[]>([])
 
-  // Subject form state
+  const [expandedSubject, setExpandedSubject] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
+
+  // Add Subject form
+  const [showAddSubject, setShowAddSubject] = useState(false)
+  const [subjectMode, setSubjectMode] = useState<'pre-clinical' | 'clinical'>('pre-clinical')
   const [newSubjectName, setNewSubjectName] = useState('')
   const [newSubjectDesc, setNewSubjectDesc] = useState('')
-  const [newSubjectSemester, setNewSubjectSemester] = useState('') // for pre-clinical
-  const [newSubjectYear, setNewSubjectYear] = useState('')         // for clinical
-  const [subjectMode, setSubjectMode] = useState<'pre-clinical' | 'clinical'>('pre-clinical')
+  const [newSubjectSemester, setNewSubjectSemester] = useState('')
+  const [newSubjectYear, setNewSubjectYear] = useState('')
 
-  // Batch form state
+  // Add Batch form
   const [newBatchName, setNewBatchName] = useState('')
   const [newBatchSubject, setNewBatchSubject] = useState('')
 
-  // Doctor form state
-  const [newDoctorName, setNewDoctorName] = useState('')
-  const [newDoctorDept, setNewDoctorDept] = useState('')
+  // Per-subject inline forms
+  const [newDoctorName, setNewDoctorName] = useState<Record<string, string>>({})
+  const [newDoctorDept, setNewDoctorDept] = useState<Record<string, string>>({})
+  const [newChapterName, setNewChapterName] = useState<Record<string, string>>({})
+  const [newLectureName, setNewLectureName] = useState<Record<string, string>>({})
+  const [selectedChapter, setSelectedChapter] = useState<Record<string, string>>({})
 
-  // Chapter/Lecture form state
-  const [selectedSubjectForChapter, setSelectedSubjectForChapter] = useState('')
-  const [newChapterName, setNewChapterName] = useState('')
-  const [newLectureName, setNewLectureName] = useState('')
-  const [selectedChapterForLecture, setSelectedChapterForLecture] = useState('')
-  const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set())
+  // ── Load ──────────────────────────────────────────────────────────────────
 
-  const [isLoading, setIsLoading] = useState(false)
-  const [message, setMessage] = useState('')
-  const [messageType, setMessageType] = useState<'success' | 'error'>('success')
-
-  useEffect(() => { loadAll() }, [])
-
-  async function loadAll() {
-    const [
-      { data: years }, { data: sems }, { data: subs },
-      { data: bats }, { data: docs }, { data: chaps }, { data: lecs },
-    ] = await Promise.all([
-      supabase.from('academic_years').select('*').order('display_order'),
+  const loadAll = useCallback(async () => {
+    const [yearsRes, semsRes, docsRes, subsRes, batchesRes] = await Promise.all([
+      supabase.from('academic_years').select('id, name, is_clinical').order('display_order'),
       supabase.from('semesters').select('*').order('display_order'),
-      supabase.from('subjects').select('*').order('name'),
-      supabase.from('batches').select('*').order('name'),
       supabase.from('doctors').select('*').order('name'),
-      supabase.from('chapters').select('*').order('display_order'),
-      supabase.from('lectures').select('*').order('display_order'),
+      supabase.from('subjects').select(`
+        id, name, description, semester_id, year_id,
+        subject_doctors(id, doctor_id, doctor:doctors(name, department)),
+        chapters(id, name, display_order, lectures(id, name, display_order)),
+        batches(id, name)
+      `).order('name'),
+      supabase.from('batches').select('*').order('name'),
     ])
-    setAcademicYears(years || [])
-    setSemesters(sems || [])
-    setSubjects(subs || [])
-    setBatches(bats || [])
-    setDoctors(docs || [])
-    setChapters(chaps || [])
-    setLectures(lecs || [])
+    setAcademicYears(yearsRes.data || [])
+    setSemesters(semsRes.data || [])
+    setAllDoctors(docsRes.data || [])
+    setSubjects((subsRes.data || []) as Subject[])
+    setBatches(batchesRes.data || [])
+  }, [])
+
+  useEffect(() => { loadAll() }, [loadAll])
+
+  // ── Toast ─────────────────────────────────────────────────────────────────
+
+  function showToast(msg: string, type: 'success' | 'error' = 'success') {
+    setToast({ msg, type })
+    setTimeout(() => setToast(null), 3000)
   }
-
-  function showMessage(msg: string, type: 'success' | 'error' = 'success') {
-    setMessage(msg)
-    setMessageType(type)
-    setTimeout(() => setMessage(''), 3000)
-  }
-
-  function toggleChapter(id: string) {
-    setExpandedChapters(prev => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
-  }
-
-  // ── Helpers ──────────────────────────────────────────────────────────────
-
-  function getSubjectLocation(subject: Subject): string {
-    if (subject.year_id) {
-      const year = academicYears.find(y => y.id === subject.year_id)
-      return year ? `${year.name} (Clinical)` : '—'
-    }
-    if (subject.semester_id) {
-      const sem = semesters.find(s => s.id === subject.semester_id)
-      if (!sem) return '—'
-      const year = academicYears.find(y => y.id === sem.academic_year_id)
-      return `${year?.name || ''} — ${sem.name}`
-    }
-    return '—'
-  }
-
-  function getSubjectName(subId: string) {
-    return subjects.find(s => s.id === subId)?.name || ''
-  }
-
-  const preClinicalYears = academicYears.filter(y => !y.is_clinical)
-  const clinicalYears    = academicYears.filter(y => y.is_clinical)
 
   // ── Subject Actions ───────────────────────────────────────────────────────
 
@@ -117,33 +102,95 @@ export default function ContentManagementPage() {
     if (!newSubjectName.trim()) return
     if (subjectMode === 'pre-clinical' && !newSubjectSemester) return
     if (subjectMode === 'clinical' && !newSubjectYear) return
-
     setIsLoading(true)
-    const { error } = await supabase
-      .from('subjects')
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .insert({
-        name: newSubjectName.trim(),
-        description: newSubjectDesc.trim() || null,
-        semester_id: subjectMode === 'pre-clinical' ? newSubjectSemester : null,
-        year_id: subjectMode === 'clinical' ? newSubjectYear : null,
-      } as any)
-    if (error) {
-      showMessage('Error: ' + error.message, 'error')
-    } else {
+    const { error } = await supabase.from('subjects').insert({
+      name: newSubjectName.trim(),
+      description: newSubjectDesc.trim() || null,
+      semester_id: subjectMode === 'pre-clinical' ? newSubjectSemester : null as any,
+      year_id: subjectMode === 'clinical' ? newSubjectYear : null as any,
+    } as any)
+    if (error) showToast(error.message, 'error')
+    else {
+      showToast('Subject added')
       setNewSubjectName(''); setNewSubjectDesc('')
       setNewSubjectSemester(''); setNewSubjectYear('')
-      await loadAll()
-      showMessage('Subject added successfully')
+      setShowAddSubject(false)
     }
-    setIsLoading(false)
+    await loadAll(); setIsLoading(false)
   }
 
   async function deleteSubject(id: string) {
-    if (!confirm('Delete this subject? This will also delete all its batches, chapters, and exams.')) return
+    if (!confirm('Delete this subject and all its data (batches, chapters, exams)?')) return
     await supabase.from('subjects').delete().eq('id', id)
-    await loadAll()
-    showMessage('Subject deleted')
+    await loadAll(); showToast('Subject deleted')
+  }
+
+  // ── Doctor Actions ────────────────────────────────────────────────────────
+
+  async function addDoctorToSubject(subjectId: string) {
+    const name = (newDoctorName[subjectId] || '').trim()
+    if (!name) return
+    setIsLoading(true)
+
+    // إنشاء الدكتور أولاً
+    const { data: doc, error } = await supabase
+      .from('doctors')
+      .insert({ name, department: (newDoctorDept[subjectId] || '').trim() || null })
+      .select('id')
+      .single()
+
+    if (error || !doc) { showToast(error?.message || 'Error', 'error'); setIsLoading(false); return }
+
+    // ربطه بالمادة
+    await supabase.from('subject_doctors').insert({ subject_id: subjectId, doctor_id: doc.id })
+
+    setNewDoctorName(p => ({ ...p, [subjectId]: '' }))
+    setNewDoctorDept(p => ({ ...p, [subjectId]: '' }))
+    await loadAll(); showToast('Doctor added'); setIsLoading(false)
+  }
+
+  async function removeDoctorFromSubject(subjectDoctorId: string) {
+    await supabase.from('subject_doctors').delete().eq('id', subjectDoctorId)
+    await loadAll(); showToast('Doctor removed')
+  }
+
+  // ── Chapter Actions ───────────────────────────────────────────────────────
+
+  async function addChapter(subjectId: string) {
+    const name = (newChapterName[subjectId] || '').trim()
+    if (!name) return
+    setIsLoading(true)
+    const subject = subjects.find(s => s.id === subjectId)
+    const order = (subject?.chapters?.length || 0) + 1
+    await supabase.from('chapters').insert({ name, subject_id: subjectId, display_order: order })
+    setNewChapterName(p => ({ ...p, [subjectId]: '' }))
+    await loadAll(); showToast('Chapter added'); setIsLoading(false)
+  }
+
+  async function deleteChapter(chapterId: string) {
+    if (!confirm('Delete this chapter and all its lectures?')) return
+    await supabase.from('chapters').delete().eq('id', chapterId)
+    await loadAll(); showToast('Chapter deleted')
+  }
+
+  // ── Lecture Actions ───────────────────────────────────────────────────────
+
+  async function addLecture(subjectId: string) {
+    const chapterId = selectedChapter[subjectId]
+    const name = (newLectureName[subjectId] || '').trim()
+    if (!chapterId || !name) return
+    setIsLoading(true)
+    const subject = subjects.find(s => s.id === subjectId)
+    const chapter = subject?.chapters.find(c => c.id === chapterId)
+    const order = (chapter?.lectures?.length || 0) + 1
+    await supabase.from('lectures').insert({ name, chapter_id: chapterId, display_order: order })
+    setNewLectureName(p => ({ ...p, [subjectId]: '' }))
+    await loadAll(); showToast('Lecture added'); setIsLoading(false)
+  }
+
+  async function deleteLecture(lectureId: string) {
+    await supabase.from('lectures').delete().eq('id', lectureId)
+    await loadAll(); showToast('Lecture deleted')
   }
 
   // ── Batch Actions ─────────────────────────────────────────────────────────
@@ -153,124 +200,75 @@ export default function ContentManagementPage() {
     setIsLoading(true)
     await supabase.from('batches').insert({ name: newBatchName.trim(), subject_id: newBatchSubject })
     setNewBatchName(''); setNewBatchSubject('')
-    await loadAll(); showMessage('Batch added successfully')
-    setIsLoading(false)
+    await loadAll(); showToast('Batch added'); setIsLoading(false)
   }
 
   async function deleteBatch(id: string) {
     if (!confirm('Delete this batch?')) return
     await supabase.from('batches').delete().eq('id', id)
-    await loadAll(); showMessage('Batch deleted')
+    await loadAll(); showToast('Batch deleted')
   }
 
-  // ── Doctor Actions ────────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
-  async function addDoctor() {
-    if (!newDoctorName.trim()) return
-    setIsLoading(true)
-    await supabase.from('doctors').insert({
-      name: newDoctorName.trim(),
-      department: newDoctorDept.trim() || null,
-    })
-    setNewDoctorName(''); setNewDoctorDept('')
-    await loadAll(); showMessage('Doctor added successfully')
-    setIsLoading(false)
+  function getSubjectLocation(subject: Subject): string {
+    if (subject.year_id) {
+      return academicYears.find(y => y.id === subject.year_id)?.name + ' (Clinical)' || '—'
+    }
+    if (subject.semester_id) {
+      const sem  = semesters.find(s => s.id === subject.semester_id)
+      const year = academicYears.find(y => y.id === sem?.academic_year_id)
+      return `${year?.name || ''} · ${sem?.name || ''}`
+    }
+    return '—'
   }
 
-  async function deleteDoctor(id: string) {
-    if (!confirm('Delete this doctor?')) return
-    await supabase.from('doctors').delete().eq('id', id)
-    await loadAll(); showMessage('Doctor deleted')
-  }
+  const preClinicalYears = academicYears.filter(y => !y.is_clinical)
+  const clinicalYears    = academicYears.filter(y => y.is_clinical)
 
-  // ── Chapter/Lecture Actions ───────────────────────────────────────────────
+  // ── CSS helpers ───────────────────────────────────────────────────────────
 
-  async function addChapter() {
-    if (!newChapterName.trim() || !selectedSubjectForChapter) return
-    setIsLoading(true)
-    const subjectChapters = chapters.filter(c => c.subject_id === selectedSubjectForChapter)
-    await supabase.from('chapters').insert({
-      name: newChapterName.trim(),
-      subject_id: selectedSubjectForChapter,
-      display_order: subjectChapters.length + 1,
-    })
-    setNewChapterName('')
-    await loadAll(); showMessage('Chapter added successfully')
-    setIsLoading(false)
-  }
-
-  async function deleteChapter(id: string) {
-    if (!confirm('Delete this chapter? All its lectures will also be deleted.')) return
-    await supabase.from('chapters').delete().eq('id', id)
-    await loadAll(); showMessage('Chapter deleted')
-  }
-
-  async function addLecture() {
-    if (!newLectureName.trim() || !selectedChapterForLecture) return
-    setIsLoading(true)
-    const chapterLectures = lectures.filter(l => l.chapter_id === selectedChapterForLecture)
-    await supabase.from('lectures').insert({
-      name: newLectureName.trim(),
-      chapter_id: selectedChapterForLecture,
-      display_order: chapterLectures.length + 1,
-    })
-    setNewLectureName('')
-    await loadAll(); showMessage('Lecture added successfully')
-    setIsLoading(false)
-  }
-
-  async function deleteLecture(id: string) {
-    if (!confirm('Delete this lecture?')) return
-    await supabase.from('lectures').delete().eq('id', id)
-    await loadAll(); showMessage('Lecture deleted')
-  }
-
-  // ── Styles ────────────────────────────────────────────────────────────────
-
-  const inputClass  = "flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
-  const selectClass = "flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black bg-white"
-  const btnClass    = "flex items-center gap-1 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
-
-  const tabs = [
-    { key: 'subjects',  label: 'Subjects',           icon: <BookOpen className="h-4 w-4" /> },
-    { key: 'batches',   label: 'Batches',             icon: <Users className="h-4 w-4" /> },
-    { key: 'doctors',   label: 'Doctors',             icon: <Stethoscope className="h-4 w-4" /> },
-    { key: 'chapters',  label: 'Chapters & Lectures', icon: <BookOpen className="h-4 w-4" /> },
-  ]
-
-  const filteredChapters = selectedSubjectForChapter
-    ? chapters.filter(c => c.subject_id === selectedSubjectForChapter)
-    : chapters
+  const inputCls  = "w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+  const selectCls = "w-full rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black"
+  const btnBlack  = "flex items-center gap-1.5 rounded-lg bg-black px-3 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-40 transition-colors"
+  const btnGhost  = "flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6">
+
+      {/* Header */}
       <div>
         <h1 className="text-2xl font-bold">Content Management</h1>
-        <p className="text-muted-foreground">Manage subjects, batches, doctors, and chapters</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          Add subjects with their doctors, chapters, and lectures. Then add batches.
+        </p>
       </div>
 
-      {message && (
-        <div className={`rounded-lg px-4 py-3 text-sm ${
-          messageType === 'error'
-            ? 'bg-red-50 text-red-700'
-            : 'bg-green-50 text-green-700'
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium shadow-lg transition-all ${
+          toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-black text-white'
         }`}>
-          {message}
+          {toast.type === 'error' ? <X className="h-4 w-4" /> : <Check className="h-4 w-4" />}
+          {toast.msg}
         </div>
       )}
 
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-border/60">
-        {tabs.map(tab => (
+      <div className="flex gap-1 rounded-xl border border-border/60 bg-muted/30 p-1 w-fit">
+        {[
+          { key: 'subjects', label: 'Subjects & Content', icon: <BookOpen className="h-4 w-4" /> },
+          { key: 'batches',  label: 'Batches',            icon: <Users className="h-4 w-4" /> },
+        ].map(tab => (
           <button
             key={tab.key}
-            onClick={() => setActiveTab(tab.key as typeof activeTab)}
-            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            onClick={() => setActiveTab(tab.key as any)}
+            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
               activeTab === tab.key
-                ? 'border-black text-black'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
+                ? 'bg-white shadow-sm text-black'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
           >
             {tab.icon}{tab.label}
@@ -278,367 +276,341 @@ export default function ContentManagementPage() {
         ))}
       </div>
 
-      {/* ══ SUBJECTS ══════════════════════════════════════════════════════════ */}
+      {/* ══ SUBJECTS TAB ════════════════════════════════════════════════════ */}
       {activeTab === 'subjects' && (
-        <div className="space-y-4">
-          <div className="rounded-xl border border-border/60 bg-card p-4 shadow-sm space-y-4">
-            <h2 className="font-semibold">Add New Subject</h2>
+        <div className="space-y-3">
 
-            {/* Toggle: Pre-Clinical / Clinical */}
-            <div className="flex gap-2">
-              <button
-                onClick={() => setSubjectMode('pre-clinical')}
-                className={`flex-1 rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
-                  subjectMode === 'pre-clinical'
-                    ? 'border-black bg-black text-white'
-                    : 'border-gray-300 text-muted-foreground hover:border-gray-400'
-                }`}
-              >
-                Pre-Clinical (Years 1–3)
-              </button>
-              <button
-                onClick={() => setSubjectMode('clinical')}
-                className={`flex-1 rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
-                  subjectMode === 'clinical'
-                    ? 'border-black bg-black text-white'
-                    : 'border-gray-300 text-muted-foreground hover:border-gray-400'
-                }`}
-              >
-                Clinical (Years 4–6)
-              </button>
-            </div>
+          {/* Add Subject Button */}
+          {!showAddSubject && (
+            <button onClick={() => setShowAddSubject(true)} className={btnBlack}>
+              <Plus className="h-4 w-4" />Add New Subject
+            </button>
+          )}
 
-            {/* Pre-Clinical: pick semester */}
-            {subjectMode === 'pre-clinical' && (
-              <div className="flex flex-col gap-3">
-                <select
-                  className={selectClass}
-                  value={newSubjectSemester}
-                  onChange={e => setNewSubjectSemester(e.target.value)}
-                >
+          {/* Add Subject Form */}
+          {showAddSubject && (
+            <div className="rounded-xl border border-black/10 bg-card p-5 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="font-semibold">New Subject</h2>
+                <button onClick={() => setShowAddSubject(false)} className="text-muted-foreground hover:text-foreground">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Toggle */}
+              <div className="flex gap-2">
+                {(['pre-clinical', 'clinical'] as const).map(mode => (
+                  <button
+                    key={mode}
+                    onClick={() => setSubjectMode(mode)}
+                    className={`flex-1 rounded-lg border py-2 text-sm font-medium transition-colors ${
+                      subjectMode === mode
+                        ? 'border-black bg-black text-white'
+                        : 'border-gray-200 text-muted-foreground hover:border-gray-300'
+                    }`}
+                  >
+                    {mode === 'pre-clinical' ? 'Pre-Clinical (Years 1–3)' : 'Clinical (Years 4–6)'}
+                  </button>
+                ))}
+              </div>
+
+              {/* Location Picker */}
+              {subjectMode === 'pre-clinical' ? (
+                <select className={selectCls} value={newSubjectSemester} onChange={e => setNewSubjectSemester(e.target.value)}>
                   <option value="">Select Semester</option>
                   {preClinicalYears.map(year => (
                     <optgroup key={year.id} label={year.name}>
-                      {semesters
-                        .filter(s => s.academic_year_id === year.id)
-                        .map(sem => (
-                          <option key={sem.id} value={sem.id}>{sem.name}</option>
-                        ))}
+                      {semesters.filter(s => s.academic_year_id === year.id).map(sem => (
+                        <option key={sem.id} value={sem.id}>{sem.name}</option>
+                      ))}
                     </optgroup>
                   ))}
                 </select>
-                <div className="flex gap-2">
-                  <input className={inputClass} placeholder="Subject name (e.g. Anatomy)" value={newSubjectName} onChange={e => setNewSubjectName(e.target.value)} />
-                  <input className={inputClass} placeholder="Description (optional)" value={newSubjectDesc} onChange={e => setNewSubjectDesc(e.target.value)} />
-                  <button
-                    onClick={addSubject}
-                    disabled={isLoading || !newSubjectName.trim() || !newSubjectSemester}
-                    className={btnClass}
-                  >
-                    <Plus className="h-4 w-4" />Add
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Clinical: pick year directly */}
-            {subjectMode === 'clinical' && (
-              <div className="flex flex-col gap-3">
-                <select
-                  className={selectClass}
-                  value={newSubjectYear}
-                  onChange={e => setNewSubjectYear(e.target.value)}
-                >
+              ) : (
+                <select className={selectCls} value={newSubjectYear} onChange={e => setNewSubjectYear(e.target.value)}>
                   <option value="">Select Clinical Year</option>
-                  {clinicalYears.map(year => (
-                    <option key={year.id} value={year.id}>{year.name}</option>
-                  ))}
+                  {clinicalYears.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
                 </select>
-                <div className="flex gap-2">
-                  <input className={inputClass} placeholder="Subject name (e.g. Internal Medicine)" value={newSubjectName} onChange={e => setNewSubjectName(e.target.value)} />
-                  <input className={inputClass} placeholder="Description (optional)" value={newSubjectDesc} onChange={e => setNewSubjectDesc(e.target.value)} />
-                  <button
-                    onClick={addSubject}
-                    disabled={isLoading || !newSubjectName.trim() || !newSubjectYear}
-                    className={btnClass}
-                  >
-                    <Plus className="h-4 w-4" />Add
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+              )}
 
-          {/* Subjects Table */}
-          <div className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
-            {subjects.length === 0 ? (
-              <div className="py-12 text-center text-sm text-muted-foreground">No subjects yet</div>
-            ) : (
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-border/60 bg-muted/30">
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-muted-foreground">Subject</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-muted-foreground">Location</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-muted-foreground">Type</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-muted-foreground">Description</th>
-                    <th className="px-4 py-3"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/60">
-                  {subjects.map(subject => (
-                    <tr key={subject.id} className="hover:bg-muted/20">
-                      <td className="px-4 py-3 font-medium text-sm">{subject.name}</td>
-                      <td className="px-4 py-3 text-sm text-muted-foreground">{getSubjectLocation(subject)}</td>
-                      <td className="px-4 py-3 text-sm">
-                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                          subject.year_id
-                            ? 'bg-purple-50 text-purple-700'
-                            : 'bg-blue-50 text-blue-700'
-                        }`}>
-                          {subject.year_id ? 'Clinical' : 'Pre-Clinical'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-muted-foreground">{subject.description || '—'}</td>
-                      <td className="px-4 py-3">
-                        <button onClick={() => deleteSubject(subject.id)} className="text-red-500 hover:text-red-700">
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
+              {/* Name & Description */}
+              <div className="flex gap-2">
+                <input className={inputCls} placeholder="Subject name (e.g. Internal Medicine)" value={newSubjectName} onChange={e => setNewSubjectName(e.target.value)} />
+                <input className={inputCls} placeholder="Description (optional)" value={newSubjectDesc} onChange={e => setNewSubjectDesc(e.target.value)} />
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-2 justify-end">
+                <button onClick={() => setShowAddSubject(false)} className={btnGhost}>Cancel</button>
+                <button
+                  onClick={addSubject}
+                  disabled={isLoading || !newSubjectName.trim() || (subjectMode === 'pre-clinical' ? !newSubjectSemester : !newSubjectYear)}
+                  className={btnBlack}
+                >
+                  {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  Add Subject
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Subjects List */}
+          {subjects.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border/60 py-16 text-center">
+              <GraduationCap className="h-10 w-10 mx-auto mb-3 text-muted-foreground opacity-40" />
+              <p className="text-sm text-muted-foreground">No subjects yet. Add your first subject above.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {subjects.map(subject => {
+                const isExpanded = expandedSubject === subject.id
+                const isClinical = !!subject.year_id
+
+                return (
+                  <div key={subject.id} className="rounded-xl border border-border/60 bg-card overflow-hidden shadow-sm">
+
+                    {/* Subject Row */}
+                    <div
+                      className="flex items-center gap-3 px-4 py-3.5 cursor-pointer hover:bg-muted/20 transition-colors"
+                      onClick={() => setExpandedSubject(isExpanded ? null : subject.id)}
+                    >
+                      {isExpanded
+                        ? <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        : <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      }
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-sm">{subject.name}</span>
+                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                            isClinical ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700'
+                          }`}>
+                            {isClinical ? 'Clinical' : 'Pre-Clinical'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-0.5 flex gap-3">
+                          <span>{getSubjectLocation(subject)}</span>
+                          <span>{subject.subject_doctors?.length || 0} doctors</span>
+                          <span>{subject.chapters?.length || 0} chapters</span>
+                          <span>{subject.batches?.length || 0} batches</span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={e => { e.stopPropagation(); deleteSubject(subject.id) }}
+                        className="text-red-400 hover:text-red-600 p-1 rounded transition-colors flex-shrink-0"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    {/* Expanded Content */}
+                    {isExpanded && (
+                      <div className="border-t border-border/40 px-4 py-4 space-y-6 bg-muted/10">
+
+                        {/* ── DOCTORS ───────────────────────────────── */}
+                        <section>
+                          <div className="flex items-center gap-2 mb-3">
+                            <Stethoscope className="h-4 w-4 text-muted-foreground" />
+                            <h3 className="text-sm font-semibold">Doctors</h3>
+                          </div>
+
+                          {/* Existing Doctors */}
+                          {(subject.subject_doctors || []).length > 0 && (
+                            <div className="flex flex-wrap gap-2 mb-3">
+                              {subject.subject_doctors.map(sd => (
+                                <div key={sd.id} className="flex items-center gap-1.5 rounded-lg border border-border/60 bg-white px-2.5 py-1 text-sm">
+                                  <span className="font-medium">{Array.isArray(sd.doctor) ? sd.doctor[0]?.name : sd.doctor.name}</span>
+                                  {(Array.isArray(sd.doctor) ? sd.doctor[0]?.department : sd.doctor.department) && (
+                                    <span className="text-muted-foreground text-xs">· {Array.isArray(sd.doctor) ? sd.doctor[0]?.department : sd.doctor.department}</span>
+                                  )}
+                                  <button onClick={() => removeDoctorFromSubject(sd.id)} className="ml-1 text-red-400 hover:text-red-600">
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Add Doctor */}
+                          <div className="flex gap-2">
+                            <input
+                              className={inputCls}
+                              placeholder="Doctor name (e.g. Dr. Ahmad)"
+                              value={newDoctorName[subject.id] || ''}
+                              onChange={e => setNewDoctorName(p => ({ ...p, [subject.id]: e.target.value }))}
+                            />
+                            <input
+                              className={inputCls}
+                              placeholder="Department (optional)"
+                              value={newDoctorDept[subject.id] || ''}
+                              onChange={e => setNewDoctorDept(p => ({ ...p, [subject.id]: e.target.value }))}
+                            />
+                            <button
+                              onClick={() => addDoctorToSubject(subject.id)}
+                              disabled={isLoading || !(newDoctorName[subject.id] || '').trim()}
+                              className={btnBlack}
+                            >
+                              <Plus className="h-4 w-4" />Add
+                            </button>
+                          </div>
+                        </section>
+
+                        {/* ── CHAPTERS & LECTURES ───────────────────── */}
+                        <section>
+                          <div className="flex items-center gap-2 mb-3">
+                            <BookOpen className="h-4 w-4 text-muted-foreground" />
+                            <h3 className="text-sm font-semibold">Chapters & Lectures</h3>
+                          </div>
+
+                          {/* Add Chapter */}
+                          <div className="flex gap-2 mb-3">
+                            <input
+                              className={inputCls}
+                              placeholder="New chapter name (e.g. Cardiovascular System)"
+                              value={newChapterName[subject.id] || ''}
+                              onChange={e => setNewChapterName(p => ({ ...p, [subject.id]: e.target.value }))}
+                            />
+                            <button
+                              onClick={() => addChapter(subject.id)}
+                              disabled={isLoading || !(newChapterName[subject.id] || '').trim()}
+                              className={btnBlack}
+                            >
+                              <Plus className="h-4 w-4" />Add Chapter
+                            </button>
+                          </div>
+
+                          {/* Add Lecture */}
+                          {(subject.chapters || []).length > 0 && (
+                            <div className="flex gap-2 mb-4">
+                              <select
+                                className={selectCls}
+                                value={selectedChapter[subject.id] || ''}
+                                onChange={e => setSelectedChapter(p => ({ ...p, [subject.id]: e.target.value }))}
+                              >
+                                <option value="">Select chapter to add lecture</option>
+                                {subject.chapters.map(c => (
+                                  <option key={c.id} value={c.id}>{c.name}</option>
+                                ))}
+                              </select>
+                              <input
+                                className={inputCls}
+                                placeholder="Lecture name"
+                                value={newLectureName[subject.id] || ''}
+                                onChange={e => setNewLectureName(p => ({ ...p, [subject.id]: e.target.value }))}
+                              />
+                              <button
+                                onClick={() => addLecture(subject.id)}
+                                disabled={isLoading || !(newLectureName[subject.id] || '').trim() || !selectedChapter[subject.id]}
+                                className={btnBlack}
+                              >
+                                <Plus className="h-4 w-4" />Add Lecture
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Chapters List */}
+                          {(subject.chapters || []).length === 0 ? (
+                            <p className="text-xs text-muted-foreground text-center py-4 border border-dashed border-border/40 rounded-lg">
+                              No chapters yet
+                            </p>
+                          ) : (
+                            <div className="space-y-2">
+                              {subject.chapters
+                                .sort((a, b) => a.display_order - b.display_order)
+                                .map(chapter => (
+                                  <div key={chapter.id} className="rounded-lg border border-border/40 bg-white overflow-hidden">
+                                    <div className="flex items-center justify-between px-3 py-2.5 bg-muted/20">
+                                      <span className="text-sm font-medium">{chapter.name}</span>
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs text-muted-foreground">
+                                          {chapter.lectures?.length || 0} lectures
+                                        </span>
+                                        <button onClick={() => deleteChapter(chapter.id)} className="text-red-400 hover:text-red-600">
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                    {(chapter.lectures || []).length > 0 && (
+                                      <ul className="divide-y divide-border/30">
+                                        {chapter.lectures
+                                          .sort((a, b) => a.display_order - b.display_order)
+                                          .map(lecture => (
+                                            <li key={lecture.id} className="flex items-center justify-between px-6 py-2 hover:bg-muted/10">
+                                              <span className="text-sm text-muted-foreground">{lecture.name}</span>
+                                              <button onClick={() => deleteLecture(lecture.id)} className="text-red-400 hover:text-red-600">
+                                                <Trash2 className="h-3 w-3" />
+                                              </button>
+                                            </li>
+                                          ))}
+                                      </ul>
+                                    )}
+                                  </div>
+                                ))}
+                            </div>
+                          )}
+                        </section>
+
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 
-      {/* ══ BATCHES ═══════════════════════════════════════════════════════════ */}
+      {/* ══ BATCHES TAB ═════════════════════════════════════════════════════ */}
       {activeTab === 'batches' && (
         <div className="space-y-4">
-          <div className="rounded-xl border border-border/60 bg-card p-4 shadow-sm">
-            <h2 className="mb-3 font-semibold">Add New Batch</h2>
+          <div className="rounded-xl border border-border/60 bg-card p-4 shadow-sm space-y-3">
+            <h2 className="font-semibold">Add New Batch</h2>
             <div className="flex gap-2">
-              <select className={selectClass} value={newBatchSubject} onChange={e => setNewBatchSubject(e.target.value)}>
+              <select className={selectCls} value={newBatchSubject} onChange={e => setNewBatchSubject(e.target.value)}>
                 <option value="">Select Subject</option>
-                {/* Pre-Clinical Subjects */}
-                {preClinicalYears.some(y => subjects.some(s => s.semester_id && semesters.find(sem => sem.id === s.semester_id)?.academic_year_id === y.id)) && (
-                  <optgroup label="── Pre-Clinical ──">
-                    {subjects
-                      .filter(s => s.semester_id)
-                      .map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </optgroup>
-                )}
-                {/* Clinical Subjects */}
-                {subjects.some(s => s.year_id) && (
-                  <optgroup label="── Clinical ──">
-                    {subjects
-                      .filter(s => s.year_id)
-                      .map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </optgroup>
-                )}
+                {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
-              <input className={inputClass} placeholder="Batch name (e.g. Wared)" value={newBatchName} onChange={e => setNewBatchName(e.target.value)} />
-              <button onClick={addBatch} disabled={isLoading || !newBatchName.trim() || !newBatchSubject} className={btnClass}>
-                <Plus className="h-4 w-4" />Add
+              <input
+                className={inputCls}
+                placeholder="Batch name (e.g. Wared)"
+                value={newBatchName}
+                onChange={e => setNewBatchName(e.target.value)}
+              />
+              <button
+                onClick={addBatch}
+                disabled={isLoading || !newBatchName.trim() || !newBatchSubject}
+                className={btnBlack}
+              >
+                {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                Add
               </button>
             </div>
           </div>
 
-          <div className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
-            {batches.length === 0 ? (
-              <div className="py-12 text-center text-sm text-muted-foreground">No batches yet</div>
-            ) : (
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-border/60 bg-muted/30">
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-muted-foreground">Batch</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-muted-foreground">Subject</th>
-                    <th className="px-4 py-3"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/60">
-                  {batches.map(batch => (
-                    <tr key={batch.id} className="hover:bg-muted/20">
-                      <td className="px-4 py-3 font-medium text-sm">{batch.name}</td>
-                      <td className="px-4 py-3 text-sm text-muted-foreground">{getSubjectName(batch.subject_id)}</td>
-                      <td className="px-4 py-3">
-                        <button onClick={() => deleteBatch(batch.id)} className="text-red-500 hover:text-red-700">
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ══ DOCTORS ═══════════════════════════════════════════════════════════ */}
-      {activeTab === 'doctors' && (
-        <div className="space-y-4">
-          <div className="rounded-xl border border-border/60 bg-card p-4 shadow-sm">
-            <h2 className="mb-3 font-semibold">Add New Doctor</h2>
-            <div className="flex gap-2">
-              <input className={inputClass} placeholder="Doctor name (e.g. Dr. Ahmad)" value={newDoctorName} onChange={e => setNewDoctorName(e.target.value)} />
-              <input className={inputClass} placeholder="Department (optional)" value={newDoctorDept} onChange={e => setNewDoctorDept(e.target.value)} />
-              <button onClick={addDoctor} disabled={isLoading || !newDoctorName.trim()} className={btnClass}>
-                <Plus className="h-4 w-4" />Add
-              </button>
+          {/* Batches grouped by subject */}
+          {subjects.filter(s => (s.batches || []).length > 0).map(subject => (
+            <div key={subject.id} className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
+              <div className="px-4 py-3 bg-muted/30 border-b border-border/40">
+                <p className="text-sm font-semibold">{subject.name}</p>
+                <p className="text-xs text-muted-foreground">{getSubjectLocation(subject)}</p>
+              </div>
+              <ul className="divide-y divide-border/40">
+                {subject.batches.map(batch => (
+                  <li key={batch.id} className="flex items-center justify-between px-4 py-3 hover:bg-muted/10">
+                    <span className="text-sm font-medium">{batch.name}</span>
+                    <button onClick={() => deleteBatch(batch.id)} className="text-red-400 hover:text-red-600">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
             </div>
-          </div>
+          ))}
 
-          <div className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
-            {doctors.length === 0 ? (
-              <div className="py-12 text-center text-sm text-muted-foreground">No doctors yet</div>
-            ) : (
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-border/60 bg-muted/30">
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-muted-foreground">Doctor</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-muted-foreground">Department</th>
-                    <th className="px-4 py-3"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/60">
-                  {doctors.map(doctor => (
-                    <tr key={doctor.id} className="hover:bg-muted/20">
-                      <td className="px-4 py-3 font-medium text-sm">{doctor.name}</td>
-                      <td className="px-4 py-3 text-sm text-muted-foreground">{doctor.department || '—'}</td>
-                      <td className="px-4 py-3">
-                        <button onClick={() => deleteDoctor(doctor.id)} className="text-red-500 hover:text-red-700">
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ══ CHAPTERS & LECTURES ═══════════════════════════════════════════════ */}
-      {activeTab === 'chapters' && (
-        <div className="space-y-4">
-
-          {/* Select Subject */}
-          <div className="rounded-xl border border-border/60 bg-card p-4 shadow-sm">
-            <h2 className="mb-3 font-semibold">Select Subject</h2>
-            <select
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black bg-white"
-              value={selectedSubjectForChapter}
-              onChange={e => setSelectedSubjectForChapter(e.target.value)}
-            >
-              <option value="">Select a subject to manage its chapters</option>
-              {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </div>
-
-          {selectedSubjectForChapter && (
-            <>
-              {/* Add Chapter */}
-              <div className="rounded-xl border border-border/60 bg-card p-4 shadow-sm">
-                <h2 className="mb-3 font-semibold">Add New Chapter</h2>
-                <div className="flex gap-2">
-                  <input
-                    className={inputClass}
-                    placeholder="Chapter name (e.g. Cardiovascular System)"
-                    value={newChapterName}
-                    onChange={e => setNewChapterName(e.target.value)}
-                  />
-                  <button onClick={addChapter} disabled={isLoading || !newChapterName.trim()} className={btnClass}>
-                    <Plus className="h-4 w-4" />Add Chapter
-                  </button>
-                </div>
-              </div>
-
-              {/* Add Lecture */}
-              <div className="rounded-xl border border-border/60 bg-card p-4 shadow-sm">
-                <h2 className="mb-3 font-semibold">Add New Lecture</h2>
-                <div className="flex gap-2">
-                  <select
-                    className={selectClass}
-                    value={selectedChapterForLecture}
-                    onChange={e => setSelectedChapterForLecture(e.target.value)}
-                  >
-                    <option value="">Select Chapter</option>
-                    {filteredChapters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                  <input
-                    className={inputClass}
-                    placeholder="Lecture name (e.g. Lecture 1 — Heart Anatomy)"
-                    value={newLectureName}
-                    onChange={e => setNewLectureName(e.target.value)}
-                  />
-                  <button onClick={addLecture} disabled={isLoading || !newLectureName.trim() || !selectedChapterForLecture} className={btnClass}>
-                    <Plus className="h-4 w-4" />Add Lecture
-                  </button>
-                </div>
-              </div>
-
-              {/* Chapters List */}
-              <div className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
-                <div className="border-b border-border/60 bg-muted/30 px-4 py-3">
-                  <h2 className="font-semibold text-sm">
-                    Chapters & Lectures — {subjects.find(s => s.id === selectedSubjectForChapter)?.name}
-                  </h2>
-                </div>
-                {filteredChapters.length === 0 ? (
-                  <div className="py-12 text-center text-sm text-muted-foreground">No chapters yet</div>
-                ) : (
-                  <ul className="divide-y divide-border/60">
-                    {filteredChapters.map(chapter => (
-                      <li key={chapter.id}>
-                        <div
-                          className="flex items-center justify-between px-4 py-3 hover:bg-muted/20 cursor-pointer"
-                          onClick={() => toggleChapter(chapter.id)}
-                        >
-                          <div className="flex items-center gap-2">
-                            {expandedChapters.has(chapter.id)
-                              ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                              : <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                            }
-                            <span className="font-medium text-sm">{chapter.name}</span>
-                            <span className="text-xs text-muted-foreground">
-                              ({lectures.filter(l => l.chapter_id === chapter.id).length} lectures)
-                            </span>
-                          </div>
-                          <button
-                            onClick={e => { e.stopPropagation(); deleteChapter(chapter.id) }}
-                            className="text-red-500 hover:text-red-700"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-
-                        {expandedChapters.has(chapter.id) && (
-                          <ul className="border-t border-border/40 bg-muted/10">
-                            {lectures.filter(l => l.chapter_id === chapter.id).length === 0 ? (
-                              <li className="px-10 py-2 text-xs text-muted-foreground">No lectures yet</li>
-                            ) : (
-                              lectures
-                                .filter(l => l.chapter_id === chapter.id)
-                                .map(lecture => (
-                                  <li key={lecture.id} className="flex items-center justify-between px-10 py-2 hover:bg-muted/20">
-                                    <span className="text-sm">{lecture.name}</span>
-                                    <button onClick={() => deleteLecture(lecture.id)} className="text-red-500 hover:text-red-700">
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                    </button>
-                                  </li>
-                                ))
-                            )}
-                          </ul>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </>
+          {subjects.every(s => (s.batches || []).length === 0) && (
+            <div className="rounded-xl border border-dashed border-border/60 py-16 text-center">
+              <Users className="h-10 w-10 mx-auto mb-3 text-muted-foreground opacity-40" />
+              <p className="text-sm text-muted-foreground">No batches yet. Add your first batch above.</p>
+            </div>
           )}
         </div>
       )}
