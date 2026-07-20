@@ -104,7 +104,7 @@ export default async function BatchPage({ params }: PageProps) {
   // رابط الامتحان يختلف بين Clinical و Pre-Clinical
   function examHref(examId: string): string {
     if (academicYear!.is_clinical) {
-      return `/${year}/${semesterSlug}/${subjectSlug}/${examId}`
+      return `/${year}/${semesterSlug}/${subjectSlug}/${batchSlug}/${examId}`
     }
     return `/${year}/${semesterSlug}/${subjectSlug}/${batchSlug}/${examId}`
   }
