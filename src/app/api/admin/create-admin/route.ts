@@ -15,7 +15,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Only Super Admins can create new admins.' }, { status: 403 })
     }
 
-    const { display_name, email, phone, batch, password, role } = await req.json()
+    const { display_name, personal_email, email, phone, batch, password, role } = await req.json()
 
     if (!display_name || !email || !password) {
       return NextResponse.json({ error: 'Name, email, and password are required.' }, { status: 400 })
@@ -45,7 +45,7 @@ export async function POST(req: Request) {
       id: newUserId,
       user_id: newUserId,
       display_name,
-      email,
+      email: personal_email || email,
       phone: phone || null,
       batch: batch || null,
       role: role || 'admin',

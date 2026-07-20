@@ -45,6 +45,7 @@ export default function AddAdminForm({ batches }: Props) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         display_name: displayName.trim(),
+        personal_email: email.trim(),
         email: adminEmail,
         phone: phone.trim(),
         batch: batch || null,
