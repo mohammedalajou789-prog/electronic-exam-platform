@@ -20,10 +20,10 @@ export default function AddAdminForm({ batches }: Props) {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
-  // Convert email: mohammedalajou789@gmail.com → mohammedalajou789@examplate.com
+  // Convert email: mohammedalajou789@gmail.com → mohammedalajou789@examplatform.com
   function convertEmail(raw: string): string {
     const local = raw.split('@')[0]
-    return `${local}@examplate.com`
+    return `${local}@examplatform.com`
   }
 
   async function handleSubmit(e: React.FormEvent) {
