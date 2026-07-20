@@ -104,7 +104,7 @@ export default async function SubjectOrBatchPage({ params }: PageProps) {
                       </div>
                     </div>
                     <Link
-                      href={`/${year}/${semesterSlug}/${subjectSlug}/${exam.id}`}
+                      href={`/${year}/${semesterSlug}/${subjectSlug}/${subjectSlug}/${exam.id}`}
                       style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 22px', borderRadius: 12, background: 'var(--clr-primary)', color: '#fff', fontSize: 14, fontWeight: 700, textDecoration: 'none', flexShrink: 0 }}
                     >
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3" /></svg>
