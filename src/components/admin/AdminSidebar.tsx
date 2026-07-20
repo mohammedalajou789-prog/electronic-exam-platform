@@ -32,7 +32,7 @@ export default function AdminSidebar({ role }: Props) {
   async function handleLogout() {
     const supabase = createClient()
     await supabase.auth.signOut()
-    router.push('/admin/login')
+    router.push('/login')
     router.refresh()
   }
 
