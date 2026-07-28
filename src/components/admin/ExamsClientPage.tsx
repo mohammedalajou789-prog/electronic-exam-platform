@@ -75,9 +75,9 @@ export default function ExamsClientPage({ exams, academicYears, semesters, batch
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Exams</h1>
+          <h1 className="text-2xl font-bold">Create Exam</h1>
           <p className="text-muted-foreground">
-            Manage all exams on the platform
+            Manage and create exams on the platform
           </p>
         </div>
         <Link

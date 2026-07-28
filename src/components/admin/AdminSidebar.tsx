@@ -43,7 +43,7 @@ export default function AdminSidebar({ role }: Props) {
 
   const allItems = [
     { label: 'Dashboard',      href: '/admin',                icon: <LayoutDashboard className="h-4 w-4" />, roles: ['super_admin', 'admin', 'leader'] },
-    { label: 'Exams',          href: '/admin/exams',          icon: <BookOpen className="h-4 w-4" />,        roles: ['super_admin', 'admin', 'leader'] },
+    { label: 'Create Exam',    href: '/admin/exams',          icon: <BookOpen className="h-4 w-4" />,        roles: ['super_admin', 'admin', 'leader'] },
     { label: 'Questions',      href: '/admin/questions',      icon: <FileText className="h-4 w-4" />,        roles: ['super_admin', 'admin', 'leader'] },
     { label: 'Content',        href: '/admin/content',        icon: <Library className="h-4 w-4" />,         roles: ['super_admin', 'admin', 'leader'] },
     { label: 'Bulk Import',    href: '/admin/import',         icon: <Upload className="h-4 w-4" />,          roles: ['super_admin', 'admin', 'leader'] },
