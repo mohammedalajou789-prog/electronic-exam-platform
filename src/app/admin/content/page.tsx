@@ -58,7 +58,7 @@ export default function ContentManagementPage() {
   // Add Batch form
   const [newBatchName, setNewBatchName] = useState('')
   const [newBatchSubject, setNewBatchSubject] = useState('')
-  const [batchNames] = useState(['Wared', 'Shaghaf', 'Future', 'Excellence', 'Nile', 'Euphrates'])
+  const [batchNames, setBatchNames] = useState<string[]>([])
   const [customBatchName, setCustomBatchName] = useState('')
   const [showCustomBatch, setShowCustomBatch] = useState(false)
 
@@ -88,7 +88,8 @@ export default function ContentManagementPage() {
     setSemesters(semsRes.data || [])
     setAllDoctors(docsRes.data || [])
     setSubjects((subsRes.data || []) as Subject[])
-    setBatches(batchesRes.data || [])
+    const uniqueNames = [...new Set((batchesRes.data || []).map((b: Batch) => b.name))]
+    setBatchNames(uniqueNames)
   }, [])
 
   useEffect(() => { loadAll() }, [loadAll])
