@@ -12,6 +12,7 @@ async function getExams() {
         name,
         subject:subjects(
           name,
+          academic_year_id,
           semester:semesters(
             name,
             academic_year:academic_years(name)
@@ -31,20 +32,36 @@ async function getExams() {
   return data || []
 }
 
+async function getFilterOptions() {
+  const supabase = await createServerSupabaseClient()
+
+  const { data: years } = await supabase
+    .from('academic_years')
+    .select('name')
+    .order('display_order')
+
+  const { data: semesters } = await supabase
+    .from('semesters')
+    .select('name')
+    .order('display_order')
+
+  const { data: batches } = await supabase
+    .from('batches')
+    .select('name')
+    .order('display_order')
+
+  return {
+    academicYears: [...new Set(years?.map(y => y.name) ?? [])] as string[],
+    semesters: [...new Set(semesters?.map(s => s.name) ?? [])] as string[],
+    batches: [...new Set(batches?.map(b => b.name) ?? [])] as string[],
+  }
+}
+
 export default async function AdminExamsPage() {
-  const exams = await getExams()
-
-  const academicYears = [...new Set(
-    exams.map((e: any) => e.batch?.subject?.semester?.academic_year?.name).filter(Boolean)
-  )] as string[]
-
-  const semesters = [...new Set(
-    exams.map((e: any) => e.batch?.subject?.semester?.name).filter(Boolean)
-  )] as string[]
-
-  const batches = [...new Set(
-    exams.map((e: any) => e.batch?.name).filter(Boolean)
-  )] as string[]
+  const [exams, { academicYears, semesters, batches }] = await Promise.all([
+    getExams(),
+    getFilterOptions(),
+  ])
 
   return (
     <ExamsClientPage
