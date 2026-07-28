@@ -44,7 +44,13 @@ export default function ExamsClientPage({ exams, academicYears, semesters, batch
 
   const filtered = useMemo(() => {
     return exams.filter((exam) => {
-      const year = exam.batch?.subject?.semester?.academic_year?.name
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const subjectAny = exam.batch?.subject as any
+      const year = String(
+        subjectAny?.semester?.academic_year?.name ||
+        subjectAny?.direct_year?.name ||
+        ''
+      )
         ?? exam.batch?.subject?.direct_year?.name
         ?? ''
       const semester = exam.batch?.subject?.semester?.name ?? ''
@@ -124,17 +130,19 @@ export default function ExamsClientPage({ exams, academicYears, semesters, batch
             ))}
           </select>
 
-          {/* Semester */}
-          <select
-            value={selectedSemester}
-            onChange={(e) => setSelectedSemester(e.target.value)}
-            className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 min-w-[150px]"
-          >
-            <option value="">All Semesters</option>
-            {semesters.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
+          {/* Semester — hidden for clinical years */}
+          {!['Fourth Year', 'Fifth Year', 'Sixth Year'].includes(selectedYear) && (
+            <select
+              value={selectedSemester}
+              onChange={(e) => setSelectedSemester(e.target.value)}
+              className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 min-w-[150px]"
+            >
+              <option value="">All Semesters</option>
+              {semesters.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          )}
 
           {/* Batch */}
           <select
