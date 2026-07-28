@@ -137,6 +137,7 @@ export default function QuestionsPage() {
           </div>
           <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
             <span className="capitalize">{exam.exam_type}{exam.calendar_year ? ` · ${exam.calendar_year}` : ''}</span>
+            {(exam.batch_detail as any)?.subject?.name && <span>{(exam.batch_detail as any).subject.name}</span>}
             {(exam.batch as any)?.name && <span>Batch: {(exam.batch as any).name}</span>}
             {(exam.doctor as any)?.name && <span>Dr. {(exam.doctor as any).name}</span>}
             <span>{exam.question_count} questions</span>
