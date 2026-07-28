@@ -35,7 +35,7 @@ interface Batch { id: string; name: string; subject_id: string }
 export default function ContentManagementPage() {
   const supabase = createClient()
 
-  const [activeTab, setActiveTab] = useState<'subjects' | 'batches'>('subjects')
+  const [activeTab, setActiveTab] = useState<'subjects' | 'batches' | 'exams'>('subjects')
   const [academicYears, setAcademicYears] = useState<AcademicYear[]>([])
   const [semesters, setSemesters] = useState<Semester[]>([])
   const [allDoctors, setAllDoctors] = useState<Doctor[]>([])
@@ -261,6 +261,7 @@ export default function ContentManagementPage() {
         {[
           { key: 'subjects', label: 'Subjects & Content', icon: <BookOpen className="h-4 w-4" /> },
           { key: 'batches',  label: 'Batches',            icon: <Users className="h-4 w-4" /> },
+          { key: 'exams',    label: 'Create Exam',        icon: <GraduationCap className="h-4 w-4" /> },
         ].map(tab => (
           <button
             key={tab.key}
@@ -612,6 +613,15 @@ export default function ContentManagementPage() {
               <p className="text-sm text-muted-foreground">No batches yet. Add your first batch above.</p>
             </div>
           )}
+        </div>
+      )}
+      {/* ══ EXAMS TAB ═══════════════════════════════════════════════════════ */}
+      {activeTab === 'exams' && (
+        <div className="rounded-xl border border-border/60 bg-card p-6 shadow-sm">
+          <iframe
+            src="/admin/exams"
+            className="w-full min-h-[800px] border-0"
+          />
         </div>
       )}
     </div>
