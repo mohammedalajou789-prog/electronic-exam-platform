@@ -47,6 +47,11 @@ export default function ContentManagementPage() {
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
   const [isLoading, setIsLoading] = useState(false)
 
+  // Filter states
+  const [filterYear, setFilterYear] = useState('')
+  const [filterSemester, setFilterSemester] = useState('')
+  const [filterSearch, setFilterSearch] = useState('')
+
   // Add Subject form
   const [showAddSubject, setShowAddSubject] = useState(false)
   const [subjectMode, setSubjectMode] = useState<'pre-clinical' | 'clinical'>('pre-clinical')
@@ -136,19 +141,13 @@ export default function ContentManagementPage() {
     const name = (newDoctorName[subjectId] || '').trim()
     if (!name) return
     setIsLoading(true)
-
-    // إنشاء الدكتور أولاً
     const { data: doc, error } = await supabase
       .from('doctors')
       .insert({ name, department: (newDoctorDept[subjectId] || '').trim() || null })
       .select('id')
       .single()
-
     if (error || !doc) { showToast(error?.message || 'Error', 'error'); setIsLoading(false); return }
-
-    // ربطه بالمادة
     await supabase.from('subject_doctors').insert({ subject_id: subjectId, doctor_id: doc.id })
-
     setNewDoctorName(p => ({ ...p, [subjectId]: '' }))
     setNewDoctorDept(p => ({ ...p, [subjectId]: '' }))
     await loadAll(); showToast('Doctor added'); setIsLoading(false)
@@ -238,6 +237,139 @@ export default function ContentManagementPage() {
   const btnBlack  = "flex items-center gap-1.5 rounded-lg bg-black px-3 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-40 transition-colors"
   const btnGhost  = "flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
 
+  // ── Subject Row Component ─────────────────────────────────────────────────
+
+  function SubjectRow({ subject }: { subject: Subject }) {
+    const isExpanded = expandedSubject === subject.id
+    const isClinical = !!subject.year_id
+    return (
+      <div className="rounded-xl border border-border/60 bg-card overflow-hidden shadow-sm">
+        <div
+          className="flex items-center gap-3 px-4 py-3.5 cursor-pointer hover:bg-muted/20 transition-colors"
+          onClick={() => setExpandedSubject(isExpanded ? null : subject.id)}
+        >
+          {isExpanded
+            ? <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            : <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+          }
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-sm">{subject.name}</span>
+              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                isClinical ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700'
+              }`}>
+                {isClinical ? 'Clinical' : 'Pre-Clinical'}
+              </span>
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5 flex gap-3">
+              <span>{subject.subject_doctors?.length || 0} doctors</span>
+              <span>{subject.chapters?.length || 0} chapters</span>
+              <span>{subject.batches?.length || 0} batches</span>
+            </div>
+          </div>
+          <button
+            onClick={e => { e.stopPropagation(); deleteSubject(subject.id) }}
+            className="text-red-400 hover:text-red-600 p-1 rounded transition-colors flex-shrink-0"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+
+        {isExpanded && (
+          <div className="border-t border-border/40 px-4 py-4 space-y-6 bg-muted/10">
+
+            {/* Doctors */}
+            <section>
+              <div className="flex items-center gap-2 mb-3">
+                <Stethoscope className="h-4 w-4 text-muted-foreground" />
+                <h3 className="text-sm font-semibold">Doctors</h3>
+              </div>
+              {(subject.subject_doctors || []).length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {subject.subject_doctors.map(sd => (
+                    <div key={sd.id} className="flex items-center gap-1.5 rounded-lg border border-border/60 bg-white px-2.5 py-1 text-sm">
+                      <span className="font-medium">{Array.isArray(sd.doctor) ? sd.doctor[0]?.name : sd.doctor.name}</span>
+                      {(Array.isArray(sd.doctor) ? sd.doctor[0]?.department : sd.doctor.department) && (
+                        <span className="text-muted-foreground text-xs">· {Array.isArray(sd.doctor) ? sd.doctor[0]?.department : sd.doctor.department}</span>
+                      )}
+                      <button onClick={() => removeDoctorFromSubject(sd.id)} className="ml-1 text-red-400 hover:text-red-600">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <input className={inputCls} placeholder="Doctor name (e.g. Dr. Ahmad)" value={newDoctorName[subject.id] || ''} onChange={e => setNewDoctorName(p => ({ ...p, [subject.id]: e.target.value }))} />
+                <input className={inputCls} placeholder="Department (optional)" value={newDoctorDept[subject.id] || ''} onChange={e => setNewDoctorDept(p => ({ ...p, [subject.id]: e.target.value }))} />
+                <button onClick={() => addDoctorToSubject(subject.id)} disabled={isLoading || !(newDoctorName[subject.id] || '').trim()} className={btnBlack}>
+                  <Plus className="h-4 w-4" />Add
+                </button>
+              </div>
+            </section>
+
+            {/* Chapters & Lectures */}
+            <section>
+              <div className="flex items-center gap-2 mb-3">
+                <BookOpen className="h-4 w-4 text-muted-foreground" />
+                <h3 className="text-sm font-semibold">Chapters & Lectures</h3>
+              </div>
+              <div className="flex gap-2 mb-3">
+                <input className={inputCls} placeholder="New chapter name (e.g. Cardiovascular System)" value={newChapterName[subject.id] || ''} onChange={e => setNewChapterName(p => ({ ...p, [subject.id]: e.target.value }))} />
+                <button onClick={() => addChapter(subject.id)} disabled={isLoading || !(newChapterName[subject.id] || '').trim()} className={btnBlack}>
+                  <Plus className="h-4 w-4" />Add Chapter
+                </button>
+              </div>
+              {(subject.chapters || []).length > 0 && (
+                <div className="flex gap-2 mb-4">
+                  <select className={selectCls} value={selectedChapter[subject.id] || ''} onChange={e => setSelectedChapter(p => ({ ...p, [subject.id]: e.target.value }))}>
+                    <option value="">Select chapter to add lecture</option>
+                    {subject.chapters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  <input className={inputCls} placeholder="Lecture name" value={newLectureName[subject.id] || ''} onChange={e => setNewLectureName(p => ({ ...p, [subject.id]: e.target.value }))} />
+                  <button onClick={() => addLecture(subject.id)} disabled={isLoading || !(newLectureName[subject.id] || '').trim() || !selectedChapter[subject.id]} className={btnBlack}>
+                    <Plus className="h-4 w-4" />Add Lecture
+                  </button>
+                </div>
+              )}
+              {(subject.chapters || []).length === 0 ? (
+                <p className="text-xs text-muted-foreground text-center py-4 border border-dashed border-border/40 rounded-lg">No chapters yet</p>
+              ) : (
+                <div className="space-y-2">
+                  {subject.chapters.sort((a, b) => a.display_order - b.display_order).map(chapter => (
+                    <div key={chapter.id} className="rounded-lg border border-border/40 bg-white overflow-hidden">
+                      <div className="flex items-center justify-between px-3 py-2.5 bg-muted/20">
+                        <span className="text-sm font-medium">{chapter.name}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">{chapter.lectures?.length || 0} lectures</span>
+                          <button onClick={() => deleteChapter(chapter.id)} className="text-red-400 hover:text-red-600">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                      {(chapter.lectures || []).length > 0 && (
+                        <ul className="divide-y divide-border/30">
+                          {chapter.lectures.sort((a, b) => a.display_order - b.display_order).map(lecture => (
+                            <li key={lecture.id} className="flex items-center justify-between px-6 py-2 hover:bg-muted/10">
+                              <span className="text-sm text-muted-foreground">{lecture.name}</span>
+                              <button onClick={() => deleteLecture(lecture.id)} className="text-red-400 hover:text-red-600">
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -284,7 +416,7 @@ export default function ContentManagementPage() {
 
       {/* ══ SUBJECTS TAB ════════════════════════════════════════════════════ */}
       {activeTab === 'subjects' && (
-        <div className="space-y-3">
+        <div className="space-y-4">
 
           {/* Add Subject Button */}
           {!showAddSubject && (
@@ -302,25 +434,19 @@ export default function ContentManagementPage() {
                   <X className="h-4 w-4" />
                 </button>
               </div>
-
-              {/* Toggle */}
               <div className="flex gap-2">
                 {(['pre-clinical', 'clinical'] as const).map(mode => (
                   <button
                     key={mode}
                     onClick={() => setSubjectMode(mode)}
                     className={`flex-1 rounded-lg border py-2 text-sm font-medium transition-colors ${
-                      subjectMode === mode
-                        ? 'border-black bg-black text-white'
-                        : 'border-gray-200 text-muted-foreground hover:border-gray-300'
+                      subjectMode === mode ? 'border-black bg-black text-white' : 'border-gray-200 text-muted-foreground hover:border-gray-300'
                     }`}
                   >
                     {mode === 'pre-clinical' ? 'Pre-Clinical (Years 1–3)' : 'Clinical (Years 4–6)'}
                   </button>
                 ))}
               </div>
-
-              {/* Location Picker */}
               {subjectMode === 'pre-clinical' ? (
                 <select className={selectCls} value={newSubjectSemester} onChange={e => setNewSubjectSemester(e.target.value)}>
                   <option value="">Select Semester</option>
@@ -338,14 +464,10 @@ export default function ContentManagementPage() {
                   {clinicalYears.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
                 </select>
               )}
-
-              {/* Name & Description */}
               <div className="flex gap-2">
                 <input className={inputCls} placeholder="Subject name (e.g. Internal Medicine)" value={newSubjectName} onChange={e => setNewSubjectName(e.target.value)} />
                 <input className={inputCls} placeholder="Description (optional)" value={newSubjectDesc} onChange={e => setNewSubjectDesc(e.target.value)} />
               </div>
-
-              {/* Actions */}
               <div className="flex gap-2 justify-end">
                 <button onClick={() => setShowAddSubject(false)} className={btnGhost}>Cancel</button>
                 <button
@@ -360,206 +482,107 @@ export default function ContentManagementPage() {
             </div>
           )}
 
-          {/* Subjects List */}
+          {/* Filter Bar */}
+          {subjects.length > 0 && (
+            <div className="rounded-xl border border-border/60 bg-card p-4 shadow-sm space-y-3">
+              <p className="text-sm font-medium text-muted-foreground">Filter Subjects</p>
+              <div className="flex flex-wrap gap-3">
+                <input
+                  type="text"
+                  placeholder="Search by subject name..."
+                  value={filterSearch}
+                  onChange={e => setFilterSearch(e.target.value)}
+                  className={inputCls}
+                />
+                <select
+                  className="rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black min-w-[150px] w-auto"
+                  value={filterYear}
+                  onChange={e => { setFilterYear(e.target.value); setFilterSemester('') }}
+                >
+                  <option value="">All Years</option>
+                  {academicYears.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
+                </select>
+                {filterYear && !clinicalYears.find(y => y.id === filterYear) && (
+                  <select
+                    className="rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black min-w-[150px] w-auto"
+                    value={filterSemester}
+                    onChange={e => setFilterSemester(e.target.value)}
+                  >
+                    <option value="">All Semesters</option>
+                    {semesters.filter(s => s.academic_year_id === filterYear).map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                )}
+                {(filterYear || filterSemester || filterSearch) && (
+                  <button
+                    onClick={() => { setFilterYear(''); setFilterSemester(''); setFilterSearch('') }}
+                    className={btnGhost}
+                  >
+                    <X className="h-4 w-4" /> Clear
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Subjects List — grouped by year and semester */}
           {subjects.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border/60 py-16 text-center">
               <GraduationCap className="h-10 w-10 mx-auto mb-3 text-muted-foreground opacity-40" />
               <p className="text-sm text-muted-foreground">No subjects yet. Add your first subject above.</p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {subjects.map(subject => {
-                const isExpanded = expandedSubject === subject.id
-                const isClinical = !!subject.year_id
+            <div className="space-y-6">
 
-                return (
-                  <div key={subject.id} className="rounded-xl border border-border/60 bg-card overflow-hidden shadow-sm">
-
-                    {/* Subject Row */}
-                    <div
-                      className="flex items-center gap-3 px-4 py-3.5 cursor-pointer hover:bg-muted/20 transition-colors"
-                      onClick={() => setExpandedSubject(isExpanded ? null : subject.id)}
-                    >
-                      {isExpanded
-                        ? <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                        : <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                      }
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-sm">{subject.name}</span>
-                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                            isClinical ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700'
-                          }`}>
-                            {isClinical ? 'Clinical' : 'Pre-Clinical'}
-                          </span>
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-0.5 flex gap-3">
-                          <span>{getSubjectLocation(subject)}</span>
-                          <span>{subject.subject_doctors?.length || 0} doctors</span>
-                          <span>{subject.chapters?.length || 0} chapters</span>
-                          <span>{subject.batches?.length || 0} batches</span>
-                        </div>
-                      </div>
-                      <button
-                        onClick={e => { e.stopPropagation(); deleteSubject(subject.id) }}
-                        className="text-red-400 hover:text-red-600 p-1 rounded transition-colors flex-shrink-0"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+              {/* Pre-Clinical Years */}
+              {preClinicalYears
+                .filter(year => !filterYear || filterYear === year.id)
+                .map(year => {
+                  const yearSemesters = semesters
+                    .filter(s => s.academic_year_id === year.id)
+                    .filter(s => !filterSemester || filterSemester === s.id)
+                  const hasAnySubject = yearSemesters.some(sem =>
+                    subjects
+                      .filter(s => s.semester_id === sem.id)
+                      .some(s => !filterSearch || s.name.toLowerCase().includes(filterSearch.toLowerCase()))
+                  )
+                  if (!hasAnySubject) return null
+                  return (
+                    <div key={year.id} className="space-y-4">
+                      <h2 className="text-base font-bold border-b border-border/60 pb-2">{year.name}</h2>
+                      {yearSemesters.map(sem => {
+                        const semSubjects = subjects
+                          .filter(s => s.semester_id === sem.id)
+                          .filter(s => !filterSearch || s.name.toLowerCase().includes(filterSearch.toLowerCase()))
+                        if (semSubjects.length === 0) return null
+                        return (
+                          <div key={sem.id} className="space-y-2">
+                            <h3 className="text-sm font-semibold text-muted-foreground pl-1">{sem.name}</h3>
+                            {semSubjects.map(subject => <SubjectRow key={subject.id} subject={subject} />)}
+                          </div>
+                        )
+                      })}
                     </div>
+                  )
+                })}
 
-                    {/* Expanded Content */}
-                    {isExpanded && (
-                      <div className="border-t border-border/40 px-4 py-4 space-y-6 bg-muted/10">
+              {/* Clinical Years */}
+              {clinicalYears
+                .filter(year => !filterYear || filterYear === year.id)
+                .map(year => {
+                  const yearSubjects = subjects
+                    .filter(s => s.year_id === year.id)
+                    .filter(s => !filterSearch || s.name.toLowerCase().includes(filterSearch.toLowerCase()))
+                  if (yearSubjects.length === 0) return null
+                  return (
+                    <div key={year.id} className="space-y-2">
+                      <h2 className="text-base font-bold border-b border-border/60 pb-2">{year.name}</h2>
+                      {yearSubjects.map(subject => <SubjectRow key={subject.id} subject={subject} />)}
+                    </div>
+                  )
+                })}
 
-                        {/* ── DOCTORS ───────────────────────────────── */}
-                        <section>
-                          <div className="flex items-center gap-2 mb-3">
-                            <Stethoscope className="h-4 w-4 text-muted-foreground" />
-                            <h3 className="text-sm font-semibold">Doctors</h3>
-                          </div>
-
-                          {/* Existing Doctors */}
-                          {(subject.subject_doctors || []).length > 0 && (
-                            <div className="flex flex-wrap gap-2 mb-3">
-                              {subject.subject_doctors.map(sd => (
-                                <div key={sd.id} className="flex items-center gap-1.5 rounded-lg border border-border/60 bg-white px-2.5 py-1 text-sm">
-                                  <span className="font-medium">{Array.isArray(sd.doctor) ? sd.doctor[0]?.name : sd.doctor.name}</span>
-                                  {(Array.isArray(sd.doctor) ? sd.doctor[0]?.department : sd.doctor.department) && (
-                                    <span className="text-muted-foreground text-xs">· {Array.isArray(sd.doctor) ? sd.doctor[0]?.department : sd.doctor.department}</span>
-                                  )}
-                                  <button onClick={() => removeDoctorFromSubject(sd.id)} className="ml-1 text-red-400 hover:text-red-600">
-                                    <X className="h-3 w-3" />
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Add Doctor */}
-                          <div className="flex gap-2">
-                            <input
-                              className={inputCls}
-                              placeholder="Doctor name (e.g. Dr. Ahmad)"
-                              value={newDoctorName[subject.id] || ''}
-                              onChange={e => setNewDoctorName(p => ({ ...p, [subject.id]: e.target.value }))}
-                            />
-                            <input
-                              className={inputCls}
-                              placeholder="Department (optional)"
-                              value={newDoctorDept[subject.id] || ''}
-                              onChange={e => setNewDoctorDept(p => ({ ...p, [subject.id]: e.target.value }))}
-                            />
-                            <button
-                              onClick={() => addDoctorToSubject(subject.id)}
-                              disabled={isLoading || !(newDoctorName[subject.id] || '').trim()}
-                              className={btnBlack}
-                            >
-                              <Plus className="h-4 w-4" />Add
-                            </button>
-                          </div>
-                        </section>
-
-                        {/* ── CHAPTERS & LECTURES ───────────────────── */}
-                        <section>
-                          <div className="flex items-center gap-2 mb-3">
-                            <BookOpen className="h-4 w-4 text-muted-foreground" />
-                            <h3 className="text-sm font-semibold">Chapters & Lectures</h3>
-                          </div>
-
-                          {/* Add Chapter */}
-                          <div className="flex gap-2 mb-3">
-                            <input
-                              className={inputCls}
-                              placeholder="New chapter name (e.g. Cardiovascular System)"
-                              value={newChapterName[subject.id] || ''}
-                              onChange={e => setNewChapterName(p => ({ ...p, [subject.id]: e.target.value }))}
-                            />
-                            <button
-                              onClick={() => addChapter(subject.id)}
-                              disabled={isLoading || !(newChapterName[subject.id] || '').trim()}
-                              className={btnBlack}
-                            >
-                              <Plus className="h-4 w-4" />Add Chapter
-                            </button>
-                          </div>
-
-                          {/* Add Lecture */}
-                          {(subject.chapters || []).length > 0 && (
-                            <div className="flex gap-2 mb-4">
-                              <select
-                                className={selectCls}
-                                value={selectedChapter[subject.id] || ''}
-                                onChange={e => setSelectedChapter(p => ({ ...p, [subject.id]: e.target.value }))}
-                              >
-                                <option value="">Select chapter to add lecture</option>
-                                {subject.chapters.map(c => (
-                                  <option key={c.id} value={c.id}>{c.name}</option>
-                                ))}
-                              </select>
-                              <input
-                                className={inputCls}
-                                placeholder="Lecture name"
-                                value={newLectureName[subject.id] || ''}
-                                onChange={e => setNewLectureName(p => ({ ...p, [subject.id]: e.target.value }))}
-                              />
-                              <button
-                                onClick={() => addLecture(subject.id)}
-                                disabled={isLoading || !(newLectureName[subject.id] || '').trim() || !selectedChapter[subject.id]}
-                                className={btnBlack}
-                              >
-                                <Plus className="h-4 w-4" />Add Lecture
-                              </button>
-                            </div>
-                          )}
-
-                          {/* Chapters List */}
-                          {(subject.chapters || []).length === 0 ? (
-                            <p className="text-xs text-muted-foreground text-center py-4 border border-dashed border-border/40 rounded-lg">
-                              No chapters yet
-                            </p>
-                          ) : (
-                            <div className="space-y-2">
-                              {subject.chapters
-                                .sort((a, b) => a.display_order - b.display_order)
-                                .map(chapter => (
-                                  <div key={chapter.id} className="rounded-lg border border-border/40 bg-white overflow-hidden">
-                                    <div className="flex items-center justify-between px-3 py-2.5 bg-muted/20">
-                                      <span className="text-sm font-medium">{chapter.name}</span>
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-xs text-muted-foreground">
-                                          {chapter.lectures?.length || 0} lectures
-                                        </span>
-                                        <button onClick={() => deleteChapter(chapter.id)} className="text-red-400 hover:text-red-600">
-                                          <Trash2 className="h-3.5 w-3.5" />
-                                        </button>
-                                      </div>
-                                    </div>
-                                    {(chapter.lectures || []).length > 0 && (
-                                      <ul className="divide-y divide-border/30">
-                                        {chapter.lectures
-                                          .sort((a, b) => a.display_order - b.display_order)
-                                          .map(lecture => (
-                                            <li key={lecture.id} className="flex items-center justify-between px-6 py-2 hover:bg-muted/10">
-                                              <span className="text-sm text-muted-foreground">{lecture.name}</span>
-                                              <button onClick={() => deleteLecture(lecture.id)} className="text-red-400 hover:text-red-600">
-                                                <Trash2 className="h-3 w-3" />
-                                              </button>
-                                            </li>
-                                          ))}
-                                      </ul>
-                                    )}
-                                  </div>
-                                ))}
-                            </div>
-                          )}
-                        </section>
-
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
             </div>
           )}
         </div>
@@ -573,8 +596,6 @@ export default function ContentManagementPage() {
             <div className="flex gap-2 flex-wrap">
               <select className={selectCls} value={newBatchSubject} onChange={e => setNewBatchSubject(e.target.value)}>
                 <option value="">Select Subject</option>
-
-                {/* Pre-Clinical: مجمّعة حسب السنة والفصل */}
                 {preClinicalYears.map(year => {
                   const yearSemesters = semesters.filter(s => s.academic_year_id === year.id)
                   return yearSemesters.map(sem => {
@@ -582,34 +603,24 @@ export default function ContentManagementPage() {
                     if (semSubjects.length === 0) return null
                     return (
                       <optgroup key={sem.id} label={`${year.name} — ${sem.name}`}>
-                        {semSubjects.map(s => (
-                          <option key={s.id} value={s.id}>{s.name}</option>
-                        ))}
+                        {semSubjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                       </optgroup>
                     )
                   })
                 })}
-
-                {/* Clinical: مجمّعة حسب السنة فقط */}
                 {clinicalYears.map(year => {
                   const yearSubjects = subjects.filter(s => s.year_id === year.id)
                   if (yearSubjects.length === 0) return null
                   return (
                     <optgroup key={year.id} label={year.name}>
-                      {yearSubjects.map(s => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
+                      {yearSubjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </optgroup>
                   )
                 })}
               </select>
 
               {!showCustomBatch ? (
-                <select
-                  className={selectCls}
-                  value={newBatchName}
-                  onChange={e => setNewBatchName(e.target.value)}
-                >
+                <select className={selectCls} value={newBatchName} onChange={e => setNewBatchName(e.target.value)}>
                   <option value="">Select Batch Name</option>
                   {batchNames.map(b => <option key={b} value={b}>{b}</option>)}
                 </select>
@@ -629,18 +640,13 @@ export default function ContentManagementPage() {
                 {showCustomBatch ? 'Choose existing' : '+ New name'}
               </button>
 
-              <button
-                onClick={addBatch}
-                disabled={isLoading || !newBatchName.trim() || !newBatchSubject}
-                className={btnBlack}
-              >
+              <button onClick={addBatch} disabled={isLoading || !newBatchName.trim() || !newBatchSubject} className={btnBlack}>
                 {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                 Add
               </button>
             </div>
           </div>
 
-          {/* Batches grouped by subject */}
           {subjects.filter(s => (s.batches || []).length > 0).map(subject => (
             <div key={subject.id} className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
               <div className="px-4 py-3 bg-muted/30 border-b border-border/40">
@@ -668,6 +674,7 @@ export default function ContentManagementPage() {
           )}
         </div>
       )}
+
       {/* ══ EXAMS TAB ═══════════════════════════════════════════════════════ */}
       {activeTab === 'exams' && (
         <ExamsTab />
