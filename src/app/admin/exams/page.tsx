@@ -13,6 +13,7 @@ async function getExams() {
         subject:subjects(
           name,
           academic_year_id,
+          direct_year:academic_years(name),
           semester:semesters(
             name,
             academic_year:academic_years(name)
