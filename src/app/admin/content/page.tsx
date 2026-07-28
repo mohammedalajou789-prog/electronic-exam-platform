@@ -1,6 +1,7 @@
 ﻿'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import ExamsTab from '@/components/admin/ExamsTab'
 import { createClient } from '@/lib/supabase/client'
 import {
   Plus, Trash2, ChevronDown, ChevronRight,
@@ -617,12 +618,7 @@ export default function ContentManagementPage() {
       )}
       {/* ══ EXAMS TAB ═══════════════════════════════════════════════════════ */}
       {activeTab === 'exams' && (
-        <div className="rounded-xl border border-border/60 bg-card p-6 shadow-sm">
-          <iframe
-            src="/admin/exams"
-            className="w-full min-h-[800px] border-0"
-          />
-        </div>
+        <ExamsTab />
       )}
     </div>
   )
