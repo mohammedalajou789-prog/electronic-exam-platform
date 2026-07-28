@@ -11,22 +11,10 @@ interface Exam {
   calendar_year: number | null
   question_count: number
   status: string
-  batch: {
-    name: string
-    subject: {
-      name: string
-      semester: {
-        name: string
-        academic_year: {
-          name: string
-        }
-      } | null
-      direct_year: {
-        name: string
-      } | null
-    }
-  } | null
+  academic_year: { name: string | null } | null
+  batch: { name: string } | null
   doctor: { name: string } | null
+  batch_detail: { subject: { name: string } | null } | null
 }
 
 interface Props {
@@ -36,26 +24,21 @@ interface Props {
   batches: string[]
 }
 
+const CLINICAL_YEARS = ['Fourth Year', 'Fifth Year', 'Sixth Year']
+
 export default function ExamsClientPage({ exams, academicYears, semesters, batches }: Props) {
   const [search, setSearch] = useState('')
   const [selectedYear, setSelectedYear] = useState('')
   const [selectedSemester, setSelectedSemester] = useState('')
   const [selectedBatch, setSelectedBatch] = useState('')
 
+  const isClinicalYear = CLINICAL_YEARS.includes(selectedYear)
+
   const filtered = useMemo(() => {
     return exams.filter((exam) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const subjectAny = exam.batch?.subject as any
-      const year = String(
-        subjectAny?.semester?.academic_year?.name ||
-        subjectAny?.direct_year?.name ||
-        ''
-      )
-        ?? exam.batch?.subject?.direct_year?.name
-        ?? ''
-      const semester = exam.batch?.subject?.semester?.name ?? ''
+      const year = exam.academic_year?.name ?? ''
       const batch = exam.batch?.name ?? ''
-      const subject = exam.batch?.subject?.name ?? ''
+      const subject = exam.batch_detail?.subject?.name ?? ''
       const title = exam.title ?? ''
 
       const matchSearch =
@@ -64,12 +47,11 @@ export default function ExamsClientPage({ exams, academicYears, semesters, batch
         subject.toLowerCase().includes(search.toLowerCase())
 
       const matchYear = selectedYear === '' || year === selectedYear
-      const matchSemester = selectedSemester === '' || semester === selectedSemester
       const matchBatch = selectedBatch === '' || batch === selectedBatch
 
-      return matchSearch && matchYear && matchSemester && matchBatch
+      return matchSearch && matchYear && matchBatch
     })
-  }, [exams, search, selectedYear, selectedSemester, selectedBatch])
+  }, [exams, search, selectedYear, selectedBatch])
 
   const hasActiveFilters = search || selectedYear || selectedSemester || selectedBatch
 
@@ -87,9 +69,7 @@ export default function ExamsClientPage({ exams, academicYears, semesters, batch
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Create Exam</h1>
-          <p className="text-muted-foreground">
-            Manage and create exams on the platform
-          </p>
+          <p className="text-muted-foreground">Manage and create exams on the platform</p>
         </div>
         <Link
           href="/admin/exams/new"
@@ -103,7 +83,6 @@ export default function ExamsClientPage({ exams, academicYears, semesters, batch
       {/* Filters */}
       <div className="rounded-xl border border-border/60 bg-card p-4 shadow-sm space-y-3">
         <p className="text-sm font-medium text-muted-foreground">Filter Exams</p>
-
         <div className="flex flex-wrap gap-3">
 
           {/* Search */}
@@ -121,7 +100,7 @@ export default function ExamsClientPage({ exams, academicYears, semesters, batch
           {/* Academic Year */}
           <select
             value={selectedYear}
-            onChange={(e) => setSelectedYear(e.target.value)}
+            onChange={(e) => { setSelectedYear(e.target.value); setSelectedSemester('') }}
             className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 min-w-[150px]"
           >
             <option value="">All Years</option>
@@ -131,7 +110,7 @@ export default function ExamsClientPage({ exams, academicYears, semesters, batch
           </select>
 
           {/* Semester — hidden for clinical years */}
-          {!['Fourth Year', 'Fifth Year', 'Sixth Year'].includes(selectedYear) && (
+          {!isClinicalYear && (
             <select
               value={selectedSemester}
               onChange={(e) => setSelectedSemester(e.target.value)}
@@ -156,7 +135,7 @@ export default function ExamsClientPage({ exams, academicYears, semesters, batch
             ))}
           </select>
 
-          {/* Clear Filters */}
+          {/* Clear */}
           {hasActiveFilters && (
             <button
               onClick={clearFilters}
@@ -167,44 +146,26 @@ export default function ExamsClientPage({ exams, academicYears, semesters, batch
             </button>
           )}
         </div>
-
-        {/* Results count */}
         <p className="text-xs text-muted-foreground">
           Showing {filtered.length} of {exams.length} exams
         </p>
       </div>
 
-      {/* Exams Table */}
+      {/* Table */}
       <div className="rounded-xl border border-border/60 bg-card shadow-sm">
         {filtered.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-border/60">
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Exam Title
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Year · Semester
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Subject
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Batch
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Doctor
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Questions
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Status
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Actions
-                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Exam Title</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Year</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Subject</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Batch</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Doctor</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Questions</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60">
@@ -217,17 +178,10 @@ export default function ExamsClientPage({ exams, academicYears, semesters, batch
                       </p>
                     </td>
                     <td className="px-6 py-4 text-sm text-muted-foreground">
-                      <p>
-                        {exam.batch?.subject?.semester?.academic_year?.name
-                          ?? exam.batch?.subject?.direct_year?.name
-                          ?? '—'}
-                      </p>
-                      <p className="text-xs">
-                        {exam.batch?.subject?.semester?.name ?? ''}
-                      </p>
+                      {exam.academic_year?.name ?? '—'}
                     </td>
                     <td className="px-6 py-4 text-sm text-muted-foreground">
-                      {exam.batch?.subject?.name ?? '—'}
+                      {exam.batch_detail?.subject?.name ?? '—'}
                     </td>
                     <td className="px-6 py-4 text-sm text-muted-foreground">
                       {exam.batch?.name ?? '—'}
@@ -235,25 +189,18 @@ export default function ExamsClientPage({ exams, academicYears, semesters, batch
                     <td className="px-6 py-4 text-sm text-muted-foreground">
                       {exam.doctor?.name ?? '—'}
                     </td>
-                    <td className="px-6 py-4 text-sm">
-                      {exam.question_count}
-                    </td>
+                    <td className="px-6 py-4 text-sm">{exam.question_count}</td>
                     <td className="px-6 py-4">
                       <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-                        exam.status === 'published'
-                          ? 'bg-green-50 text-green-700'
-                          : exam.status === 'draft'
-                          ? 'bg-yellow-50 text-yellow-700'
-                          : 'bg-gray-50 text-gray-700'
+                        exam.status === 'published' ? 'bg-green-50 text-green-700' :
+                        exam.status === 'draft' ? 'bg-yellow-50 text-yellow-700' :
+                        'bg-gray-50 text-gray-700'
                       }`}>
                         {exam.status}
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      <Link
-                        href={`/admin/exams/${exam.id}/edit`}
-                        className="text-sm text-primary hover:underline"
-                      >
+                      <Link href={`/admin/exams/${exam.id}/edit`} className="text-sm text-primary hover:underline">
                         Edit
                       </Link>
                     </td>
@@ -269,23 +216,14 @@ export default function ExamsClientPage({ exams, academicYears, semesters, batch
             <p className="mb-4 text-sm text-muted-foreground">
               {hasActiveFilters ? 'Try adjusting your filters' : 'Create your first exam to get started'}
             </p>
-            {!hasActiveFilters && (
-              <Link
-                href="/admin/exams/new"
-                className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-              >
-                <Plus className="h-4 w-4" />
-                Create Exam
-              </Link>
-            )}
-            {hasActiveFilters && (
-              <button
-                onClick={clearFilters}
-                className="flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm hover:bg-muted/50"
-              >
-                <X className="h-4 w-4" />
-                Clear Filters
+            {hasActiveFilters ? (
+              <button onClick={clearFilters} className="flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm hover:bg-muted/50">
+                <X className="h-4 w-4" /> Clear Filters
               </button>
+            ) : (
+              <Link href="/admin/exams/new" className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+                <Plus className="h-4 w-4" /> Create Exam
+              </Link>
             )}
           </div>
         )}
