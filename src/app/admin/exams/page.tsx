@@ -123,7 +123,7 @@ export default function QuestionsPage() {
   function ExamCard({ exam }: { exam: Exam }) {
     return (
       <Link
-        href={`/admin/questions/${exam.id}/edit`}
+        href={`/admin/exams/${exam.id}`}
         className="flex items-center gap-4 rounded-xl border border-border/60 bg-card px-5 py-4 shadow-sm hover:bg-muted/20 transition-colors group"
       >
         <div className="flex-1 min-w-0">
