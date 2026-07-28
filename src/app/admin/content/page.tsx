@@ -58,6 +58,9 @@ export default function ContentManagementPage() {
   // Add Batch form
   const [newBatchName, setNewBatchName] = useState('')
   const [newBatchSubject, setNewBatchSubject] = useState('')
+  const [batchNames] = useState(['Wared', 'Shaghaf', 'Future', 'Excellence', 'Nile', 'Euphrates'])
+  const [customBatchName, setCustomBatchName] = useState('')
+  const [showCustomBatch, setShowCustomBatch] = useState(false)
 
   // Per-subject inline forms
   const [newDoctorName, setNewDoctorName] = useState<Record<string, string>>({})
@@ -566,17 +569,37 @@ export default function ContentManagementPage() {
         <div className="space-y-4">
           <div className="rounded-xl border border-border/60 bg-card p-4 shadow-sm space-y-3">
             <h2 className="font-semibold">Add New Batch</h2>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <select className={selectCls} value={newBatchSubject} onChange={e => setNewBatchSubject(e.target.value)}>
                 <option value="">Select Subject</option>
                 {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
-              <input
-                className={inputCls}
-                placeholder="Batch name (e.g. Wared)"
-                value={newBatchName}
-                onChange={e => setNewBatchName(e.target.value)}
-              />
+
+              {!showCustomBatch ? (
+                <select
+                  className={selectCls}
+                  value={newBatchName}
+                  onChange={e => setNewBatchName(e.target.value)}
+                >
+                  <option value="">Select Batch Name</option>
+                  {batchNames.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
+              ) : (
+                <input
+                  className={inputCls}
+                  placeholder="Enter new batch name..."
+                  value={customBatchName}
+                  onChange={e => { setCustomBatchName(e.target.value); setNewBatchName(e.target.value) }}
+                />
+              )}
+
+              <button
+                onClick={() => { setShowCustomBatch(p => !p); setNewBatchName(''); setCustomBatchName('') }}
+                className={btnGhost}
+              >
+                {showCustomBatch ? 'Choose existing' : '+ New name'}
+              </button>
+
               <button
                 onClick={addBatch}
                 disabled={isLoading || !newBatchName.trim() || !newBatchSubject}
