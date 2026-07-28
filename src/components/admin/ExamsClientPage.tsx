@@ -20,7 +20,10 @@ interface Exam {
         academic_year: {
           name: string
         }
-      }
+      } | null
+      direct_year: {
+        name: string
+      } | null
     }
   } | null
   doctor: { name: string } | null
@@ -41,7 +44,9 @@ export default function ExamsClientPage({ exams, academicYears, semesters, batch
 
   const filtered = useMemo(() => {
     return exams.filter((exam) => {
-      const year = exam.batch?.subject?.semester?.academic_year?.name ?? ''
+      const year = exam.batch?.subject?.semester?.academic_year?.name
+        ?? exam.batch?.subject?.direct_year?.name
+        ?? ''
       const semester = exam.batch?.subject?.semester?.name ?? ''
       const batch = exam.batch?.name ?? ''
       const subject = exam.batch?.subject?.name ?? ''
@@ -204,8 +209,14 @@ export default function ExamsClientPage({ exams, academicYears, semesters, batch
                       </p>
                     </td>
                     <td className="px-6 py-4 text-sm text-muted-foreground">
-                      <p>{exam.batch?.subject?.semester?.academic_year?.name ?? '—'}</p>
-                      <p className="text-xs">{exam.batch?.subject?.semester?.name ?? ''}</p>
+                      <p>
+                        {exam.batch?.subject?.semester?.academic_year?.name
+                          ?? exam.batch?.subject?.direct_year?.name
+                          ?? '—'}
+                      </p>
+                      <p className="text-xs">
+                        {exam.batch?.subject?.semester?.name ?? ''}
+                      </p>
                     </td>
                     <td className="px-6 py-4 text-sm text-muted-foreground">
                       {exam.batch?.subject?.name ?? '—'}

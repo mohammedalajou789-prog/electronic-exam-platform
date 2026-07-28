@@ -1,4 +1,3 @@
-
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import ExamsClientPage from '@/components/admin/ExamsClientPage'
 
@@ -16,7 +15,8 @@ async function getExams() {
           semester:semesters(
             name,
             academic_year:academic_years(name)
-          )
+          ),
+          direct_year:academic_years(name)
         )
       ),
       doctor:doctors(name)
@@ -35,13 +35,23 @@ async function getExams() {
 export default async function AdminExamsPage() {
   const exams = await getExams()
 
-  // استخراج القيم الفريدة للفلاتر
+  // دالة مساعدة لاستخراج اسم السنة (من semester أو مباشرة)
+  function getYearName(e: any): string {
+    return e.batch?.subject?.semester?.academic_year?.name
+      ?? e.batch?.subject?.direct_year?.name
+      ?? ''
+  }
+
+  function getSemesterName(e: any): string {
+    return e.batch?.subject?.semester?.name ?? ''
+  }
+
   const academicYears = [...new Set(
-    exams.map((e: any) => e.batch?.subject?.semester?.academic_year?.name).filter(Boolean)
+    exams.map((e: any) => getYearName(e)).filter(Boolean)
   )] as string[]
 
   const semesters = [...new Set(
-    exams.map((e: any) => e.batch?.subject?.semester?.name).filter(Boolean)
+    exams.map((e: any) => getSemesterName(e)).filter(Boolean)
   )] as string[]
 
   const batches = [...new Set(
