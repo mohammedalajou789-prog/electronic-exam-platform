@@ -573,7 +573,35 @@ export default function ContentManagementPage() {
             <div className="flex gap-2 flex-wrap">
               <select className={selectCls} value={newBatchSubject} onChange={e => setNewBatchSubject(e.target.value)}>
                 <option value="">Select Subject</option>
-                {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+
+                {/* Pre-Clinical: مجمّعة حسب السنة والفصل */}
+                {preClinicalYears.map(year => {
+                  const yearSemesters = semesters.filter(s => s.academic_year_id === year.id)
+                  return yearSemesters.map(sem => {
+                    const semSubjects = subjects.filter(s => s.semester_id === sem.id)
+                    if (semSubjects.length === 0) return null
+                    return (
+                      <optgroup key={sem.id} label={`${year.name} — ${sem.name}`}>
+                        {semSubjects.map(s => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </optgroup>
+                    )
+                  })
+                })}
+
+                {/* Clinical: مجمّعة حسب السنة فقط */}
+                {clinicalYears.map(year => {
+                  const yearSubjects = subjects.filter(s => s.year_id === year.id)
+                  if (yearSubjects.length === 0) return null
+                  return (
+                    <optgroup key={year.id} label={year.name}>
+                      {yearSubjects.map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </optgroup>
+                  )
+                })}
               </select>
 
               {!showCustomBatch ? (
