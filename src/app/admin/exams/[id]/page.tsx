@@ -1,6 +1,5 @@
 'use client'
-
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Save, Trash2, ChevronDown, ChevronUp, ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
@@ -253,9 +252,10 @@ function QuestionCard({ question, onSave, onDelete }: {
   )
 }
 
-export default function ExamEditPage({ params }: { params: { id: string } }) {
+export default function ExamEditPage({ params }: { params: Promise<{ id: string }> }) {
   const supabase = createClient()
   const router = useRouter()
+  const { id } = React.use(params)
   const [exam, setExam] = useState<Exam | null>(null)
   const [questions, setQuestions] = useState<Question[]>([])
   const [loading, setLoading] = useState(true)
@@ -267,10 +267,10 @@ export default function ExamEditPage({ params }: { params: { id: string } }) {
           id, title, exam_type, calendar_year, status, question_count,
           batch:batches(name, subject:subjects(name)),
           doctor:doctors(name)
-        `).eq('id', params.id).single(),
+        `).eq('id', id).single(),
         supabase.from('questions')
           .select('*')
-          .eq('exam_id', params.id)
+          .eq('exam_id', id)
           .is('deleted_at', null)
           .order('question_order'),
       ])
@@ -279,7 +279,7 @@ export default function ExamEditPage({ params }: { params: { id: string } }) {
       setLoading(false)
     }
     load()
-  }, [params.id])
+  }, [id])
 
   async function handleSave(id: string, data: Partial<Question>) {
     await supabase.from('questions').update({ ...data, updated_at: new Date().toISOString() }).eq('id', id)
