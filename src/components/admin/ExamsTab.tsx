@@ -33,8 +33,7 @@ export default function ExamsTab() {
   const [title, setTitle] = useState('')
   const [examType, setExamType] = useState('final')
   const [calendarYear, setCalendarYear] = useState(new Date().getFullYear().toString())
-  const [duration, setDuration] = useState('')
-  const [timerMode, setTimerMode] = useState('none')
+  
   const [status, setStatus] = useState('draft')
 
   useEffect(() => {
@@ -92,8 +91,7 @@ export default function ExamsTab() {
       academic_year_id: selectedYear || null,
       exam_type: examType,
       calendar_year: calendarYear ? parseInt(calendarYear) : null,
-      duration_minutes: duration ? parseInt(duration) : null,
-      timer_mode: timerMode,
+      
       status: status,
       question_count: 0,
     }).select('id').single()
@@ -242,29 +240,11 @@ export default function ExamsTab() {
                 </select>
               </div>
 
-              {/* Duration */}
-              <div>
-                <label className={labelCls}>Duration (minutes)</label>
-                <input
-                  className={inputCls}
-                  placeholder="e.g. 90"
-                  value={duration}
-                  onChange={e => setDuration(e.target.value)}
-                  type="number"
-                />
-              </div>
+              
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              {/* Timer Mode */}
-              <div>
-                <label className={labelCls}>Timer Mode</label>
-                <select className={selectCls} value={timerMode} onChange={e => setTimerMode(e.target.value)}>
-                  <option value="none">No Timer</option>
-                  <option value="suggested">Suggested</option>
-                  <option value="strict">Strict</option>
-                </select>
-              </div>
+              
 
               {/* Status */}
               <div>
