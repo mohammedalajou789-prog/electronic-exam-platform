@@ -1,7 +1,7 @@
 ﻿'use client'
 
 import Link from 'next/link'
-import { Home, LogOut, ShieldCheck } from 'lucide-react'
+import { Home, LogOut } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
@@ -38,39 +38,25 @@ export default function AdminNavbar() {
           </div>
         </Link>
 
-        {/* Nav links */}
-        <nav style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 8 }}>
-          <Link href="/admin" style={{ borderRadius: 10, border: '1px solid var(--bd)', padding: '7px 14px', fontSize: 14, fontWeight: 600, color: 'var(--fg)', textDecoration: 'none' }}>
-            Dashboard
-          </Link>
-        </nav>
-
         {/* Spacer */}
         <div style={{ flex: 1 }} />
 
         {/* Right side */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-
-          {/* Student Panel */}
-          <Link href="/" target="_blank" style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '8px 14px', borderRadius: 10,
-            border: '1px solid var(--bd)', background: 'transparent',
-            color: 'var(--fg)', fontSize: 13, fontWeight: 700,
-            textDecoration: 'none',
-          }}>
-            <Home size={14} /> Student Panel
+          <Link href="/admin" style={{ borderRadius: 10, border: '1px solid var(--bd)', padding: '7px 14px', fontSize: 14, fontWeight: 600, color: 'var(--fg)', textDecoration: 'none' }}>
+            Dashboard
           </Link>
 
-          {/* Admin badge */}
-          <div style={{
+          {/* Student Panel */}
+          <Link href="/" style={{
             display: 'flex', alignItems: 'center', gap: 6,
             padding: '8px 14px', borderRadius: 10,
             background: 'var(--clr-primary)', color: '#fff',
             fontSize: 13, fontWeight: 700,
+            textDecoration: 'none',
           }}>
-            <ShieldCheck size={14} /> Admin Panel
-          </div>
+            <Home size={14} /> Student Panel
+          </Link>
 
           {/* Logout */}
           <button onClick={handleLogout} style={{
