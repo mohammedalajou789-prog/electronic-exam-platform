@@ -38,6 +38,9 @@ export default function ExamsTab() {
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
   const [editingExam, setEditingExam] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<Record<string, any>>({})
+  const [examSearch, setExamSearch] = useState('')
+  const [examFilterYear, setExamFilterYear] = useState('')
+  const [examFilterSemester, setExamFilterSemester] = useState('')
 
   const [selectedYear, setSelectedYear] = useState('')
   const [selectedSemester, setSelectedSemester] = useState('')
@@ -261,85 +264,177 @@ export default function ExamsTab() {
 
       {/* Existing Exams */}
       {exams.length > 0 && (
-        <div className="space-y-3">
+        <div className="space-y-4">
           <h2 className="font-semibold text-base border-b border-border/60 pb-2">Existing Exams</h2>
-          {exams.map(exam => (
-            <div key={exam.id} className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
-              {editingExam !== exam.id ? (
-                <div className="flex items-center gap-4 px-5 py-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-semibold text-sm">{exam.title}</span>
-                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                        exam.status === 'published' ? 'bg-green-50 text-green-700' :
-                        exam.status === 'draft' ? 'bg-yellow-50 text-yellow-700' :
-                        'bg-gray-50 text-gray-700'
-                      }`}>{exam.status}</span>
-                    </div>
-                    <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-                      <span>{(exam.academic_year as any)?.name ?? '—'}</span>
-                      <span>{(exam.batch_detail as any)?.subject?.name ?? '—'}</span>
-                      <span>Batch: {(exam.batch as any)?.name ?? '—'}</span>
-                      {(exam.doctor as any)?.name && <span>Dr. {(exam.doctor as any).name}</span>}
-                      <span className="capitalize">{exam.exam_type}{exam.calendar_year ? ` · ${exam.calendar_year}` : ''}</span>
-                      <span>{exam.question_count} questions</span>
-                    </div>
+
+          {/* Filter */}
+          <div className="flex flex-wrap gap-3">
+            <input
+              type="text"
+              placeholder="Search exams..."
+              value={examSearch}
+              onChange={e => setExamSearch(e.target.value)}
+              className={inputCls}
+            />
+            <select
+              className="rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black min-w-[150px] w-auto"
+              value={examFilterYear}
+              onChange={e => { setExamFilterYear(e.target.value); setExamFilterSemester('') }}
+            >
+              <option value="">All Years</option>
+              {academicYears.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
+            </select>
+            {examFilterYear && !academicYears.find(y => y.id === examFilterYear)?.is_clinical && (
+              <select
+                className="rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black min-w-[150px] w-auto"
+                value={examFilterSemester}
+                onChange={e => setExamFilterSemester(e.target.value)}
+              >
+                <option value="">All Semesters</option>
+                {semesters.filter(s => s.academic_year_id === examFilterYear).map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            )}
+            {(examSearch || examFilterYear || examFilterSemester) && (
+              <button
+                onClick={() => { setExamSearch(''); setExamFilterYear(''); setExamFilterSemester('') }}
+                className="flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-2 text-sm hover:bg-gray-50"
+              >
+                <X className="h-4 w-4" /> Clear
+              </button>
+            )}
+          </div>
+
+          {/* Grouped */}
+          <div className="space-y-6">
+            {academicYears
+              .filter(year => !examFilterYear || examFilterYear === year.id)
+              .map(year => {
+                const yearSems = semesters
+                  .filter(s => s.academic_year_id === year.id)
+                  .filter(s => !examFilterSemester || examFilterSemester === s.id)
+
+                const matchExam = (exam: Exam) =>
+                  (exam.academic_year as any)?.name === year.name &&
+                  (!examSearch ||
+                    exam.title.toLowerCase().includes(examSearch.toLowerCase()) ||
+                    ((exam.batch_detail as any)?.subject?.name ?? '').toLowerCase().includes(examSearch.toLowerCase()))
+
+                const ExamCard = ({ exam }: { exam: Exam }) => (
+                  <div className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
+                    {editingExam !== exam.id ? (
+                      <div className="flex items-center gap-4 px-5 py-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-semibold text-sm">{exam.title}</span>
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                              exam.status === 'published' ? 'bg-green-50 text-green-700' :
+                              exam.status === 'draft' ? 'bg-yellow-50 text-yellow-700' :
+                              'bg-gray-50 text-gray-700'
+                            }`}>{exam.status}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                            <span>{(exam.batch_detail as any)?.subject?.name ?? '—'}</span>
+                            <span>Batch: {(exam.batch as any)?.name ?? '—'}</span>
+                            {(exam.doctor as any)?.name && <span>Dr. {(exam.doctor as any).name}</span>}
+                            <span className="capitalize">{exam.exam_type}{exam.calendar_year ? ` · ${exam.calendar_year}` : ''}</span>
+                            <span>{exam.question_count} questions</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => startEdit(exam)}
+                            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/50 transition-colors">
+                            <Pencil className="h-3.5 w-3.5" /> Edit Info
+                          </button>
+                          <button onClick={() => router.push(`/admin/exams/${exam.id}`)}
+                            className="flex items-center gap-1.5 rounded-lg bg-black px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800 transition-colors">
+                            Questions <ChevronRight className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="px-5 py-4 space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className={labelCls}>Title</label>
+                            <input className={inputCls} value={editForm.title} onChange={e => setEditForm(p => ({ ...p, title: e.target.value }))} />
+                          </div>
+                          <div>
+                            <label className={labelCls}>Calendar Year</label>
+                            <input className={inputCls} value={editForm.calendar_year} onChange={e => setEditForm(p => ({ ...p, calendar_year: e.target.value }))} />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className={labelCls}>Exam Type</label>
+                            <select className={selectCls} value={editForm.exam_type} onChange={e => setEditForm(p => ({ ...p, exam_type: e.target.value }))}>
+                              <option value="quiz">Quiz</option>
+                              <option value="midterm">Midterm</option>
+                              <option value="final">Final</option>
+                              <option value="practical">Practical</option>
+                              <option value="mock">Mock</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className={labelCls}>Status</label>
+                            <select className={selectCls} value={editForm.status} onChange={e => setEditForm(p => ({ ...p, status: e.target.value }))}>
+                              <option value="draft">Draft</option>
+                              <option value="published">Published</option>
+                              <option value="archived">Archived</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div className="flex gap-2 justify-end">
+                          <button onClick={() => setEditingExam(null)}
+                            className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-muted/50">Cancel</button>
+                          <button onClick={() => saveEdit(exam.id)}
+                            className="flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800">
+                            <Save className="h-4 w-4" /> Save
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => startEdit(exam)}
-                      className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/50 transition-colors">
-                      <Pencil className="h-3.5 w-3.5" /> Edit Info
-                    </button>
-                    <button onClick={() => router.push(`/admin/exams/${exam.id}`)}
-                      className="flex items-center gap-1.5 rounded-lg bg-black px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800 transition-colors">
-                      Questions <ChevronRight className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="px-5 py-4 space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className={labelCls}>Title</label>
-                      <input className={inputCls} value={editForm.title} onChange={e => setEditForm(p => ({ ...p, title: e.target.value }))} />
+                )
+
+                if (year.is_clinical) {
+                  const yearExams = exams.filter(matchExam)
+                  if (yearExams.length === 0) return null
+                  return (
+                    <div key={year.id} className="space-y-2">
+                      <h3 className="text-sm font-bold border-b border-border/40 pb-1">{year.name}</h3>
+                      {yearExams.map(exam => <ExamCard key={exam.id} exam={exam} />)}
                     </div>
-                    <div>
-                      <label className={labelCls}>Calendar Year</label>
-                      <input className={inputCls} value={editForm.calendar_year} onChange={e => setEditForm(p => ({ ...p, calendar_year: e.target.value }))} />
+                  )
+                }
+
+                const hasAny = yearSems.some(sem =>
+                  exams.filter(matchExam).some(e =>
+                    subjects.find(s => s.id === (batches.find(b => b.id === (e as any).batch_id)?.subject_id))?.semester_id === sem.id
+                  )
+                )
+                if (!hasAny && yearSems.length > 0) {
+                  const allYearExams = exams.filter(matchExam)
+                  if (allYearExams.length === 0) return null
+                  return (
+                    <div key={year.id} className="space-y-2">
+                      <h3 className="text-sm font-bold border-b border-border/40 pb-1">{year.name}</h3>
+                      {allYearExams.map(exam => <ExamCard key={exam.id} exam={exam} />)}
                     </div>
+                  )
+                }
+
+                const yearExams = exams.filter(matchExam)
+                if (yearExams.length === 0) return null
+                return (
+                  <div key={year.id} className="space-y-3">
+                    <h3 className="text-sm font-bold border-b border-border/40 pb-1">{year.name}</h3>
+                    {yearExams.map(exam => <ExamCard key={exam.id} exam={exam} />)}
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className={labelCls}>Exam Type</label>
-                      <select className={selectCls} value={editForm.exam_type} onChange={e => setEditForm(p => ({ ...p, exam_type: e.target.value }))}>
-                        <option value="quiz">Quiz</option>
-                        <option value="midterm">Midterm</option>
-                        <option value="final">Final</option>
-                        <option value="practical">Practical</option>
-                        <option value="mock">Mock</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className={labelCls}>Status</label>
-                      <select className={selectCls} value={editForm.status} onChange={e => setEditForm(p => ({ ...p, status: e.target.value }))}>
-                        <option value="draft">Draft</option>
-                        <option value="published">Published</option>
-                        <option value="archived">Archived</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div className="flex gap-2 justify-end">
-                    <button onClick={() => setEditingExam(null)}
-                      className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-muted/50">Cancel</button>
-                    <button onClick={() => saveEdit(exam.id)}
-                      className="flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800">
-                      <Save className="h-4 w-4" /> Save
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
+                )
+              })}
+          </div>
         </div>
       )}
     </div>
