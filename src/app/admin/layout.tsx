@@ -1,7 +1,7 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import AdminSidebar from '@/components/admin/AdminSidebar'
-import AdminNavbar from '@/components/admin/AdminNavbar'
+import AdminLayoutClient from '@/components/admin/AdminLayoutClient'
 
 export default async function AdminLayout({
   children,
@@ -11,29 +11,39 @@ export default async function AdminLayout({
   const supabase = await createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  // No user — show login page without sidebar
   if (!user) {
     redirect('/login')
   }
 
-  // Get admin role
+  // Use select('*') to avoid errors if specific columns don't exist
   const { data: admin } = await supabase
     .from('admins')
-    .select('role')
+    .select('*')
     .eq('id', user.id)
     .single()
 
   const role = (admin?.role as 'admin' | 'super_admin' | 'leader') || 'admin'
 
+  // Safely read optional columns — won't crash if they don't exist in DB
+  const adminRecord = admin as Record<string, unknown> | null
+  const userName  = (adminRecord?.['name'] as string | undefined)
+                    || user.email?.split('@')[0]
+                    || 'Electronic'
+  const userEmail = user.email || undefined
+  const userBatch = adminRecord?.['batch'] as string | undefined
+
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-background">
-      <AdminNavbar />
-      <div className="flex flex-1 overflow-hidden">
-        <AdminSidebar role={role} />
-        <main className="flex-1 overflow-y-auto p-6">
-          {children}
-        </main>
-      </div>
-    </div>
+    <AdminLayoutClient
+      sidebar={
+        <AdminSidebar
+          role={role}
+          userName={userName}
+          userEmail={userEmail}
+          userBatch={userBatch}
+        />
+      }
+    >
+      {children}
+    </AdminLayoutClient>
   )
 }
