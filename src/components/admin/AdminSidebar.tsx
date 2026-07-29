@@ -42,10 +42,8 @@ export default function AdminSidebar({ role }: Props) {
   }
 
   const allItems = [
-    { label: 'Dashboard',      href: '/admin',                icon: <LayoutDashboard className="h-4 w-4" />, roles: ['super_admin', 'admin', 'leader'] },
-    
-    { label: 'Exams',      href: '/admin/exams',      icon: <FileText className="h-4 w-4" />,        roles: ['super_admin', 'admin', 'leader'] },
     { label: 'Content',        href: '/admin/content',        icon: <Library className="h-4 w-4" />,         roles: ['super_admin', 'admin', 'leader'] },
+    { label: 'Exams',          href: '/admin/exams',          icon: <FileText className="h-4 w-4" />,        roles: ['super_admin', 'admin', 'leader'] },
     { label: 'Bulk Import',    href: '/admin/import',         icon: <Upload className="h-4 w-4" />,          roles: ['super_admin', 'admin', 'leader'] },
     { label: 'Manual Import',  href: '/admin/manual-import',  icon: <PenLine className="h-4 w-4" />,         roles: ['super_admin', 'admin', 'leader'] },
     { label: 'Reports',        href: '/admin/reports',        icon: <Flag className="h-4 w-4" />,            roles: ['super_admin', 'admin', 'leader'] },
@@ -100,14 +98,7 @@ export default function AdminSidebar({ role }: Props) {
       </nav>
 
       <div className="border-t border-border/60 p-3 space-y-1">
-        <Link
-          href="/"
-          target="_blank"
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <LayoutDashboard className="h-4 w-4" />
-          Student Home
-        </Link>
+        
         <button
           onClick={handleLogout}
           className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
