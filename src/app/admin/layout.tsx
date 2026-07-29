@@ -26,13 +26,10 @@ export default async function AdminLayout({
   const role = (admin?.role as 'admin' | 'super_admin' | 'leader') || 'admin'
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
-      <AdminSidebar role={role} />
-      <div className="flex flex-1 flex-col overflow-hidden">
-
-        
-
-        <AdminNavbar />
+    <div className="flex flex-col h-screen overflow-hidden bg-background">
+      <AdminNavbar />
+      <div className="flex flex-1 overflow-hidden">
+        <AdminSidebar role={role} />
         <main className="flex-1 overflow-y-auto p-6">
           {children}
         </main>
