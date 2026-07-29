@@ -41,6 +41,7 @@ export default function ExamsTab() {
   const [examSearch, setExamSearch] = useState('')
   const [examFilterYear, setExamFilterYear] = useState('')
   const [examFilterSemester, setExamFilterSemester] = useState('')
+  const [examFilterSubject, setExamFilterSubject] = useState('')
 
   const [selectedYear, setSelectedYear] = useState('')
   const [selectedSemester, setSelectedSemester] = useState('')
@@ -269,26 +270,20 @@ export default function ExamsTab() {
 
           {/* Filter */}
           <div className="flex flex-wrap gap-3">
-            <input
-              type="text"
-              placeholder="Search exams..."
-              value={examSearch}
-              onChange={e => setExamSearch(e.target.value)}
-              className={inputCls}
-            />
             <select
               className="rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black min-w-[150px] w-auto"
               value={examFilterYear}
-              onChange={e => { setExamFilterYear(e.target.value); setExamFilterSemester('') }}
+              onChange={e => { setExamFilterYear(e.target.value); setExamFilterSemester(''); setExamFilterSubject('') }}
             >
               <option value="">All Years</option>
               {academicYears.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
             </select>
+
             {examFilterYear && !academicYears.find(y => y.id === examFilterYear)?.is_clinical && (
               <select
                 className="rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black min-w-[150px] w-auto"
                 value={examFilterSemester}
-                onChange={e => setExamFilterSemester(e.target.value)}
+                onChange={e => { setExamFilterSemester(e.target.value); setExamFilterSubject('') }}
               >
                 <option value="">All Semesters</option>
                 {semesters.filter(s => s.academic_year_id === examFilterYear).map(s => (
@@ -296,9 +291,27 @@ export default function ExamsTab() {
                 ))}
               </select>
             )}
-            {(examSearch || examFilterYear || examFilterSemester) && (
+
+            {(examFilterYear && (academicYears.find(y => y.id === examFilterYear)?.is_clinical || examFilterSemester)) && (
+              <select
+                className="rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black min-w-[150px] w-auto"
+                value={examFilterSubject}
+                onChange={e => setExamFilterSubject(e.target.value)}
+              >
+                <option value="">All Subjects</option>
+                {subjects
+                  .filter(s => {
+                    const yr = academicYears.find(y => y.id === examFilterYear)
+                    if (yr?.is_clinical) return s.year_id === examFilterYear
+                    return s.semester_id === examFilterSemester
+                  })
+                  .map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            )}
+
+            {(examFilterYear || examFilterSemester || examFilterSubject) && (
               <button
-                onClick={() => { setExamSearch(''); setExamFilterYear(''); setExamFilterSemester('') }}
+                onClick={() => { setExamFilterYear(''); setExamFilterSemester(''); setExamFilterSubject('') }}
                 className="flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-2 text-sm hover:bg-gray-50"
               >
                 <X className="h-4 w-4" /> Clear
@@ -315,11 +328,13 @@ export default function ExamsTab() {
                   .filter(s => s.academic_year_id === year.id)
                   .filter(s => !examFilterSemester || examFilterSemester === s.id)
 
-                const matchExam = (exam: Exam) =>
-                  (exam.academic_year as any)?.name === year.name &&
-                  (!examSearch ||
-                    exam.title.toLowerCase().includes(examSearch.toLowerCase()) ||
-                    ((exam.batch_detail as any)?.subject?.name ?? '').toLowerCase().includes(examSearch.toLowerCase()))
+                const matchExam = (exam: Exam) => {
+                  const matchYear = (exam.academic_year as any)?.name === year.name
+                  const subjectName = (exam.batch_detail as any)?.subject?.name ?? ''
+                  const matchSubject = !examFilterSubject ||
+                    subjects.find(s => s.id === examFilterSubject)?.name === subjectName
+                  return matchYear && matchSubject
+                }
 
                 const ExamCard = ({ exam }: { exam: Exam }) => (
                   <div className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
