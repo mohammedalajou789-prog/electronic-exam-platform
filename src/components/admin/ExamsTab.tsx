@@ -1,178 +1,293 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
-import Link from 'next/link'
-import { BookOpen, Plus, Search, X } from 'lucide-react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { Plus, Loader2, Check, X } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 
-const CLINICAL_YEARS = ['Fourth Year', 'Fifth Year', 'Sixth Year']
+interface AcademicYear { id: string; name: string; is_clinical: boolean }
+interface Semester { id: string; name: string; academic_year_id: string }
+interface Subject { id: string; name: string; semester_id: string | null; year_id: string | null }
+interface Batch { id: string; name: string; subject_id: string }
+interface Doctor { id: string; name: string }
 
 export default function ExamsTab() {
   const supabase = createClient()
-  const [exams, setExams] = useState<any[]>([])
-  const [academicYears, setAcademicYears] = useState<string[]>([])
-  const [semesters, setSemesters] = useState<string[]>([])
-  const [batches, setBatches] = useState<string[]>([])
-  const [search, setSearch] = useState('')
+  const router = useRouter()
+
+  const [academicYears, setAcademicYears] = useState<AcademicYear[]>([])
+  const [semesters, setSemesters] = useState<Semester[]>([])
+  const [subjects, setSubjects] = useState<Subject[]>([])
+  const [batches, setBatches] = useState<Batch[]>([])
+  const [doctors, setDoctors] = useState<Doctor[]>([])
+  const [loading, setLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
+
+  // Form state
   const [selectedYear, setSelectedYear] = useState('')
   const [selectedSemester, setSelectedSemester] = useState('')
+  const [selectedSubject, setSelectedSubject] = useState('')
   const [selectedBatch, setSelectedBatch] = useState('')
+  const [selectedDoctor, setSelectedDoctor] = useState('')
+  const [title, setTitle] = useState('')
+  const [examType, setExamType] = useState('final')
+  const [calendarYear, setCalendarYear] = useState(new Date().getFullYear().toString())
+  const [duration, setDuration] = useState('')
+  const [timerMode, setTimerMode] = useState('none')
+  const [status, setStatus] = useState('draft')
 
   useEffect(() => {
     async function load() {
-      const [examsRes, yearsRes, semsRes, batchesRes] = await Promise.all([
-        supabase.from('exams').select(`
-          id, title, exam_type, calendar_year, question_count, status,
-          academic_year:academic_years(name),
-          batch:batches(name),
-          batch_detail:batches(subject:subjects(name))
-        `).is('deleted_at', null).order('created_at', { ascending: false }),
-        supabase.from('academic_years').select('name').order('display_order'),
-        supabase.from('semesters').select('name').order('display_order'),
-        supabase.from('batches').select('name').order('display_order'),
+      const [yearsRes, semsRes, subsRes, batchesRes, docsRes] = await Promise.all([
+        supabase.from('academic_years').select('id, name, is_clinical').order('display_order'),
+        supabase.from('semesters').select('id, name, academic_year_id').order('display_order'),
+        supabase.from('subjects').select('id, name, semester_id, year_id').order('name'),
+        supabase.from('batches').select('id, name, subject_id').order('name'),
+        supabase.from('doctors').select('id, name').order('name'),
       ])
-      setExams(examsRes.data ?? [])
-      setAcademicYears([...new Set(yearsRes.data?.map(y => y.name) ?? [])])
-      setSemesters([...new Set(semsRes.data?.map(s => s.name) ?? [])])
-      setBatches([...new Set(batchesRes.data?.map(b => b.name) ?? [])])
+      setAcademicYears(yearsRes.data ?? [])
+      setSemesters(semsRes.data ?? [])
+      setSubjects(subsRes.data ?? [])
+      setBatches(batchesRes.data ?? [])
+      setDoctors(docsRes.data ?? [])
+      setLoading(false)
     }
     load()
   }, [])
 
-  const isClinicalYear = CLINICAL_YEARS.includes(selectedYear)
+  function showToast(msg: string, type: 'success' | 'error' = 'success') {
+    setToast({ msg, type })
+    setTimeout(() => setToast(null), 3000)
+  }
 
-  const filtered = useMemo(() => {
-    return exams.filter((exam) => {
-      const year = (exam.academic_year as any)?.name ?? ''
-      const batch = (exam.batch as any)?.name ?? ''
-      const subject = (exam.batch_detail as any)?.subject?.name ?? ''
-      const title = exam.title ?? ''
-      const matchSearch = search === '' ||
-        title.toLowerCase().includes(search.toLowerCase()) ||
-        subject.toLowerCase().includes(search.toLowerCase())
-      const matchYear = selectedYear === '' || year === selectedYear
-      const matchBatch = selectedBatch === '' || batch === selectedBatch
-      return matchSearch && matchYear && matchBatch
-    })
-  }, [exams, search, selectedYear, selectedBatch])
+  const selectedYearObj = academicYears.find(y => y.id === selectedYear)
+  const isClinical = selectedYearObj?.is_clinical ?? false
 
-  const hasActiveFilters = search || selectedYear || selectedSemester || selectedBatch
+  const filteredSemesters = semesters.filter(s => s.academic_year_id === selectedYear)
 
-  function clearFilters() {
-    setSearch(''); setSelectedYear('')
-    setSelectedSemester(''); setSelectedBatch('')
+  const filteredSubjects = subjects.filter(s => {
+    if (isClinical) return s.year_id === selectedYear
+    if (selectedSemester) return s.semester_id === selectedSemester
+    return false
+  })
+
+  const filteredBatches = batches.filter(b => b.subject_id === selectedSubject)
+
+  const filteredDoctors = doctors
+
+  async function handleCreate() {
+    if (!title.trim() || !selectedBatch) {
+      showToast('Please fill all required fields', 'error')
+      return
+    }
+
+    setIsSaving(true)
+
+    // جلب academic_year_id للامتحان
+    const { data: exam, error } = await supabase.from('exams').insert({
+      title: title.trim(),
+      batch_id: selectedBatch,
+      doctor_id: selectedDoctor || null,
+      academic_year_id: selectedYear || null,
+      exam_type: examType,
+      calendar_year: calendarYear ? parseInt(calendarYear) : null,
+      duration_minutes: duration ? parseInt(duration) : null,
+      timer_mode: timerMode,
+      status: status,
+      question_count: 0,
+    }).select('id').single()
+
+    setIsSaving(false)
+
+    if (error) {
+      showToast(error.message, 'error')
+      return
+    }
+
+    showToast('Exam created successfully!')
+    setTimeout(() => {
+      router.push(`/admin/exams/${exam.id}`)
+    }, 1000)
+  }
+
+  const inputCls = "w-full rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black"
+  const selectCls = inputCls
+  const labelCls = "block text-sm font-medium mb-1.5"
+
+  if (loading) {
+    return <div className="animate-pulse space-y-4">
+      {[1,2,3,4].map(i => <div key={i} className="h-12 bg-muted rounded-lg" />)}
+    </div>
   }
 
   return (
     <div className="space-y-6">
 
-      {/* Filters */}
-      <div className="rounded-xl border border-border/60 bg-card p-4 shadow-sm space-y-3">
-        <p className="text-sm font-medium text-muted-foreground">Filter Exams</p>
-        <div className="flex flex-wrap gap-3">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Search by title or subject..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full rounded-lg border border-border bg-background pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-            />
-          </div>
-          <select
-            value={selectedYear}
-            onChange={(e) => { setSelectedYear(e.target.value); setSelectedSemester('') }}
-            className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 min-w-[150px]"
-          >
-            <option value="">All Years</option>
-            {academicYears.map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
-          {!isClinicalYear && (
-            <select
-              value={selectedSemester}
-              onChange={(e) => setSelectedSemester(e.target.value)}
-              className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 min-w-[150px]"
-            >
-              <option value="">All Semesters</option>
-              {semesters.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          )}
-          <select
-            value={selectedBatch}
-            onChange={(e) => setSelectedBatch(e.target.value)}
-            className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 min-w-[150px]"
-          >
-            <option value="">All Batches</option>
-            {batches.map(b => <option key={b} value={b}>{b}</option>)}
-          </select>
-          {hasActiveFilters && (
-            <button onClick={clearFilters} className="flex items-center gap-1 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-muted/50">
-              <X className="h-4 w-4" /> Clear
-            </button>
-          )}
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium shadow-lg ${
+          toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-black text-white'
+        }`}>
+          {toast.type === 'error' ? <X className="h-4 w-4" /> : <Check className="h-4 w-4" />}
+          {toast.msg}
         </div>
-        <p className="text-xs text-muted-foreground">Showing {filtered.length} of {exams.length} exams</p>
-      </div>
+      )}
 
-      {/* Table */}
-      <div className="rounded-xl border border-border/60 bg-card shadow-sm">
-        {filtered.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border/60">
-                  {['Exam Title','Year','Subject','Batch','Doctor','Questions','Status','Actions'].map(h => (
-                    <th key={h} className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/60">
-                {filtered.map((exam) => (
-                  <tr key={exam.id} className="hover:bg-muted/30 transition-colors">
-                    <td className="px-6 py-4">
-                      <p className="font-medium">{exam.title}</p>
-                      <p className="text-xs text-muted-foreground capitalize">
-                        {exam.exam_type}{exam.calendar_year ? ` · ${exam.calendar_year}` : ''}
-                      </p>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-muted-foreground">{(exam.academic_year as any)?.name ?? '—'}</td>
-                    <td className="px-6 py-4 text-sm text-muted-foreground">{(exam.batch_detail as any)?.subject?.name ?? '—'}</td>
-                    <td className="px-6 py-4 text-sm text-muted-foreground">{(exam.batch as any)?.name ?? '—'}</td>
-                    <td className="px-6 py-4 text-sm text-muted-foreground">{(exam.doctor as any)?.name ?? '—'}</td>
-                    <td className="px-6 py-4 text-sm">{exam.question_count}</td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-                        exam.status === 'published' ? 'bg-green-50 text-green-700' :
-                        exam.status === 'draft' ? 'bg-yellow-50 text-yellow-700' :
-                        'bg-gray-50 text-gray-700'
-                      }`}>{exam.status}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <Link href={`/admin/exams/${exam.id}/edit`} className="text-sm text-primary hover:underline">Edit</Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <div className="rounded-xl border border-border/60 bg-card p-6 shadow-sm space-y-5">
+        <h2 className="font-semibold text-lg">New Exam</h2>
+
+        {/* Step 1: Academic Year */}
+        <div>
+          <label className={labelCls}>Academic Year <span className="text-red-500">*</span></label>
+          <select className={selectCls} value={selectedYear} onChange={e => {
+            setSelectedYear(e.target.value)
+            setSelectedSemester('')
+            setSelectedSubject('')
+            setSelectedBatch('')
+          }}>
+            <option value="">Select Year</option>
+            {academicYears.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
+          </select>
+        </div>
+
+        {/* Step 2: Semester (pre-clinical only) */}
+        {selectedYear && !isClinical && (
+          <div>
+            <label className={labelCls}>Semester <span className="text-red-500">*</span></label>
+            <select className={selectCls} value={selectedSemester} onChange={e => {
+              setSelectedSemester(e.target.value)
+              setSelectedSubject('')
+              setSelectedBatch('')
+            }}>
+              <option value="">Select Semester</option>
+              {filteredSemesters.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
           </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <BookOpen className="mb-4 h-12 w-12 text-muted-foreground/50" />
-            <h3 className="mb-2 text-lg font-semibold">No exams found</h3>
-            <p className="mb-4 text-sm text-muted-foreground">
-              {hasActiveFilters ? 'Try adjusting your filters' : 'Create your first exam to get started'}
-            </p>
-            {hasActiveFilters ? (
-              <button onClick={clearFilters} className="flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm hover:bg-muted/50">
-                <X className="h-4 w-4" /> Clear Filters
+        )}
+
+        {/* Step 3: Subject */}
+        {(isClinical ? selectedYear : selectedSemester) && (
+          <div>
+            <label className={labelCls}>Subject <span className="text-red-500">*</span></label>
+            <select className={selectCls} value={selectedSubject} onChange={e => {
+              setSelectedSubject(e.target.value)
+              setSelectedBatch('')
+            }}>
+              <option value="">Select Subject</option>
+              {filteredSubjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+        )}
+
+        {/* Step 4: Batch */}
+        {selectedSubject && (
+          <div>
+            <label className={labelCls}>Batch <span className="text-red-500">*</span></label>
+            <select className={selectCls} value={selectedBatch} onChange={e => setSelectedBatch(e.target.value)}>
+              <option value="">Select Batch</option>
+              {filteredBatches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
+        )}
+
+        {/* Exam Details — show after batch selected */}
+        {selectedBatch && (
+          <>
+            <hr className="border-border/60" />
+
+            {/* Title */}
+            <div>
+              <label className={labelCls}>Exam Title <span className="text-red-500">*</span></label>
+              <input
+                className={inputCls}
+                placeholder="e.g. Final Exam, Quiz 1, Midterm..."
+                value={title}
+                onChange={e => setTitle(e.target.value)}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              {/* Exam Type */}
+              <div>
+                <label className={labelCls}>Exam Type</label>
+                <select className={selectCls} value={examType} onChange={e => setExamType(e.target.value)}>
+                  <option value="quiz">Quiz</option>
+                  <option value="midterm">Midterm</option>
+                  <option value="final">Final</option>
+                  <option value="practical">Practical</option>
+                  <option value="mock">Mock</option>
+                </select>
+              </div>
+
+              {/* Calendar Year */}
+              <div>
+                <label className={labelCls}>Calendar Year</label>
+                <input
+                  className={inputCls}
+                  placeholder="e.g. 2025"
+                  value={calendarYear}
+                  onChange={e => setCalendarYear(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              {/* Doctor */}
+              <div>
+                <label className={labelCls}>Doctor</label>
+                <select className={selectCls} value={selectedDoctor} onChange={e => setSelectedDoctor(e.target.value)}>
+                  <option value="">No doctor</option>
+                  {filteredDoctors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              </div>
+
+              {/* Duration */}
+              <div>
+                <label className={labelCls}>Duration (minutes)</label>
+                <input
+                  className={inputCls}
+                  placeholder="e.g. 90"
+                  value={duration}
+                  onChange={e => setDuration(e.target.value)}
+                  type="number"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              {/* Timer Mode */}
+              <div>
+                <label className={labelCls}>Timer Mode</label>
+                <select className={selectCls} value={timerMode} onChange={e => setTimerMode(e.target.value)}>
+                  <option value="none">No Timer</option>
+                  <option value="suggested">Suggested</option>
+                  <option value="strict">Strict</option>
+                </select>
+              </div>
+
+              {/* Status */}
+              <div>
+                <label className={labelCls}>Status</label>
+                <select className={selectCls} value={status} onChange={e => setStatus(e.target.value)}>
+                  <option value="draft">Draft</option>
+                  <option value="published">Published</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Submit */}
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={handleCreate}
+                disabled={isSaving || !title.trim()}
+                className="flex items-center gap-2 rounded-lg bg-black px-6 py-2.5 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50 transition-colors"
+              >
+                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                {isSaving ? 'Creating...' : 'Create Exam'}
               </button>
-            ) : (
-              <Link href="/admin/exams/new" className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
-                <Plus className="h-4 w-4" /> Create Exam
-              </Link>
-            )}
-          </div>
+            </div>
+          </>
         )}
       </div>
     </div>
