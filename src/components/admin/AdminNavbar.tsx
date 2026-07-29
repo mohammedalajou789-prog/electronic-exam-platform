@@ -1,9 +1,9 @@
 ﻿'use client'
 
 import Link from 'next/link'
+import { Home, LogOut, ShieldCheck } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { LogOut, Home } from 'lucide-react'
 
 export default function AdminNavbar() {
   const router = useRouter()
@@ -34,25 +34,45 @@ export default function AdminNavbar() {
             style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover' }} />
           <div style={{ lineHeight: 1.2 }}>
             <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg)' }}>Medical Club</div>
-            <div style={{ fontSize: 10.5, fontWeight: 500, color: 'var(--fg-muted)' }}>Admin Panel</div>
+            <div style={{ fontSize: 10.5, fontWeight: 500, color: 'var(--fg-muted)' }}>Exam Platform</div>
           </div>
         </Link>
+
+        {/* Nav links */}
+        <nav style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 8 }}>
+          <Link href="/admin" style={{ borderRadius: 10, border: '1px solid var(--bd)', padding: '7px 14px', fontSize: 14, fontWeight: 600, color: 'var(--fg)', textDecoration: 'none' }}>
+            Dashboard
+          </Link>
+        </nav>
 
         {/* Spacer */}
         <div style={{ flex: 1 }} />
 
-        {/* Actions */}
+        {/* Right side */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+
+          {/* Student Panel */}
           <Link href="/" target="_blank" style={{
             display: 'flex', alignItems: 'center', gap: 6,
             padding: '8px 14px', borderRadius: 10,
             border: '1px solid var(--bd)', background: 'transparent',
-            color: 'var(--fg)', fontSize: 13, fontWeight: 600,
+            color: 'var(--fg)', fontSize: 13, fontWeight: 700,
             textDecoration: 'none',
           }}>
             <Home size={14} /> Student Panel
           </Link>
 
+          {/* Admin badge */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '8px 14px', borderRadius: 10,
+            background: 'var(--clr-primary)', color: '#fff',
+            fontSize: 13, fontWeight: 700,
+          }}>
+            <ShieldCheck size={14} /> Admin Panel
+          </div>
+
+          {/* Logout */}
           <button onClick={handleLogout} style={{
             display: 'flex', alignItems: 'center', gap: 6,
             padding: '8px 14px', borderRadius: 10,
@@ -62,8 +82,8 @@ export default function AdminNavbar() {
           }}>
             <LogOut size={14} /> Logout
           </button>
-        </div>
 
+        </div>
       </div>
     </header>
   )
