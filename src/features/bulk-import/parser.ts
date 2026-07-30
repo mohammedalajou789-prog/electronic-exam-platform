@@ -141,28 +141,24 @@ function parseQuestionBlock(
       continue
     }
 
-    // Chapter — flexible spacing around colon
+    // Chapter — only process if NOT inside explanation
     const chapterValue = extractField(line, 'Chapter')
-    if (chapterValue !== null) {
-      chapter = chapterValue || undefined  // empty string = no chapter
-      inExplanation = false
+    if (chapterValue !== null && !inExplanation) {
+      chapter = chapterValue || undefined
       continue
     }
 
-    // Lecture — flexible spacing around colon
+    // Lecture — only process if NOT inside explanation
     const lectureValue = extractField(line, 'Lecture')
-    if (lectureValue !== null) {
+    if (lectureValue !== null && !inExplanation) {
       lecture = lectureValue || undefined
-      inExplanation = false
       continue
     }
 
-    // Doctor — flexible spacing around colon
-    // Empty value is acceptable (treated as no doctor)
+    // Doctor — only process if NOT inside explanation
     const doctorValue = extractField(line, 'Doctor')
-    if (doctorValue !== null) {
-      doctorName = doctorValue || undefined  // empty = no doctor, not an error
-      inExplanation = false
+    if (doctorValue !== null && !inExplanation) {
+      doctorName = doctorValue || undefined
       continue
     }
 
@@ -173,6 +169,8 @@ function parseQuestionBlock(
       inWrongAnswers = false
       if (explanationValue) {
         explanationLines = [explanationValue]
+      } else {
+        explanationLines = []
       }
       continue
     }
@@ -182,7 +180,7 @@ function parseQuestionBlock(
       inWrongAnswers = true
       inExplanation = false
       if (explanationLines.length > 0) {
-        explanation = explanationLines.join(' ')
+        explanation = explanationLines.join('\n')
       }
       continue
     }
@@ -197,15 +195,23 @@ function parseQuestionBlock(
     }
 
     // Explanation continuation lines
-    if (inExplanation && !line.match(/^[A-Ea-e]\./)) {
-      explanationLines.push(line)
-      continue
+    if (inExplanation) {
+      // Stop only if we hit a known field header
+      const isKnownField =
+        extractField(line, 'Chapter') !== null ||
+        extractField(line, 'Lecture') !== null ||
+        extractField(line, 'Doctor') !== null ||
+        line.match(/^Wrong\s+answers?\s*(explanation)?\s*:\s*$/i)
+      if (!isKnownField) {
+        explanationLines.push(line)
+        continue
+      }
     }
   }
 
   // Merge explanation lines
   if (explanationLines.length > 0 && !explanation) {
-    explanation = explanationLines.join(' ')
+    explanation = explanationLines.join('\n')
   }
 
   // Validate choices

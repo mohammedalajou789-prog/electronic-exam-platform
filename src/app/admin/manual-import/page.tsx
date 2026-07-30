@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Plus, Trash2, ImagePlus, X, Save, CheckCircle } from 'lucide-react'
 import Link from 'next/link'
+import { MnEditor } from '@/components/shared/MnEditor'
 
 interface Exam { id: string; title: string; batch_id: string }
 interface Batch { id: string; name: string; subject_id: string }
@@ -633,7 +634,12 @@ export default function ManualImportPage() {
                 {/* Explanation */}
                 <div>
                   <label className="mi-label">Explanation (Correct Answer)</label>
-                  <textarea className="mi-textarea" value={q.explanation} onChange={e => updateQuestion(qIndex, 'explanation', e.target.value)} rows={2} placeholder="Why is this answer correct?" style={{ minHeight:56 }} />
+                  <MnEditor
+                    value={q.explanation}
+                    onChange={(value) => updateQuestion(qIndex, 'explanation', value)}
+                    placeholder="Why is this answer correct? Supports MN Syntax..."
+                    minHeight="120px"
+                  />
                 </div>
 
                 {/* Wrong explanations */}

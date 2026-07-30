@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { parseBulkImport, type ParsedQuestion, type ParseError } from '@/features/bulk-import/parser'
 import { ChevronDown, ChevronUp, ImagePlus, X } from 'lucide-react'
+import { ExplanationRenderer } from '@/components/exam/ExplanationRenderer'
 
 interface Exam { id: string; title: string; batch_id: string }
 interface Batch { id: string; name: string; subject_id: string }
@@ -50,12 +51,15 @@ export default function BulkImportPage() {
   const [validationErrors, setValidationErrors] = useState<string[]>([])
 
   const [stagedImages, setStagedImages] = useState<Record<number, StagedImage[]>>({})
+  const [stagedExplanationImages, setStagedExplanationImages] = useState<Record<number, Record<1|2|3, string|null>>>({})
   const [isImporting, setIsImporting] = useState(false)
   const [importResult, setImportResult] = useState<{ imported: number; errors: number } | null>(null)
   const [expandedQuestions, setExpandedQuestions] = useState<Set<number>>(new Set())
   const [copiedFormat, setCopiedFormat] = useState(false)
 const [copiedNames, setCopiedNames] = useState(false)
+const [copiedPrompt, setCopiedPrompt] = useState(false)
 const [formatExpanded, setFormatExpanded] = useState(false)
+const [examInfoExpanded, setExamInfoExpanded] = useState(false)
   const [examSearch, setExamSearch] = useState('')
   const [expandedSubject, setExpandedSubject] = useState<string | null>(null)
 
@@ -63,6 +67,7 @@ const [formatExpanded, setFormatExpanded] = useState(false)
     subjectId: string
     chapters: string[]
     lectures: string[]
+    lecturesWithChapter: { name: string; chapterName: string }[]
     doctors: string[]
   } | null>(null)
 
@@ -105,7 +110,13 @@ const [formatExpanded, setFormatExpanded] = useState(false)
     const subjectChapters = allChapters.filter(c => c.subject_id === subjectId).map(c => c.name)
     const chapterIds = allChapters.filter(c => c.subject_id === subjectId).map(c => c.id)
     const subjectLectures = allLectures.filter(l => chapterIds.includes(l.chapter_id)).map(l => l.name)
-    setExamInfo({ subjectId, chapters: subjectChapters, lectures: subjectLectures, doctors: doctors.map(d => d.name) })
+    const lecturesWithChapter = allLectures
+      .filter(l => chapterIds.includes(l.chapter_id))
+      .map(l => ({
+        name: l.name,
+        chapterName: allChapters.find(c => c.id === l.chapter_id)?.name || ''
+      }))
+    setExamInfo({ subjectId, chapters: subjectChapters, lectures: subjectLectures, lecturesWithChapter, doctors: doctors.map(d => d.name) })
     if (subjectName) setExpandedSubject(subjectName)
   }
 
@@ -249,7 +260,24 @@ A. Why A is wrong
 C. Why C is wrong
 D. Why D is wrong
 
-2. Next question...`
+2. Next question...
+
+━━━ MN SYNTAX (for Explanation) ━━━
+**text**        Bold
+*text*          Italic
+==text==        Highlight (yellow background)
+!!text!!        Callout box (orange)
+~~text~~        Green text
+::text::        Blue text
+__text__        Underline
+[Image Slot 1]  Image placeholder (upload after import)
+[Image Slot 2]  Second image placeholder
+[Image Slot 3]  Third image placeholder
+[TABLE]
+| Column 1 | Column 2 |
+|----------|----------|
+| Value 1  | Value 2  |
+[/TABLE]`
 
   function copyFormat() {
     navigator.clipboard.writeText(formatTemplate)
@@ -264,6 +292,127 @@ D. Why D is wrong
   }
 
   const allErrors = [...parseErrors.map(e => `Question ${e.questionNumber}: ${e.message}`), ...validationErrors]
+
+  function copyAsPrompt() {
+    if (!examInfo) return
+    const isMultipleDoctors = examInfo.doctors.length > 1
+
+    // Group lectures by chapter with numbering
+    const lecturesByChapter: Record<string, { name: string; num: number }[]> = {}
+    let lectureCounter = 1
+    const numberedLectures: { name: string; chapterName: string; num: number }[] = []
+
+    examInfo.chapters.forEach(chapterName => {
+      const chapterLectures = examInfo.lecturesWithChapter
+        .filter(l => l.chapterName === chapterName)
+        .map(l => {
+          const entry = { name: l.name, chapterName, num: lectureCounter++ }
+          numberedLectures.push(entry)
+          return { name: l.name, num: entry.num }
+        })
+      if (chapterLectures.length > 0) {
+        lecturesByChapter[chapterName] = chapterLectures
+      }
+    })
+
+    const lecturesSection = Object.entries(lecturesByChapter).map(([chapter, lectures]) =>
+      `  ${chapter}:\n${lectures.map(l => `    ${l.num}. ${l.name}`).join('\n')}`
+    ).join('\n\n') || '  (No lectures defined)'
+
+    const doctorInstruction = isMultipleDoctors
+      ? `Each doctor teaches specific lectures. Assign each question to the correct doctor based on the lecture number.
+Doctors and their lectures:
+${examInfo.doctors.map(d => `  - ${d} ( )`).join('\n')}
+
+The lecture numbers in the parentheses above are left blank — fill them in manually before using this prompt.`
+      : `All questions are taught by: ${examInfo.doctors[0] || 'N/A'}
+Add this line to every question: Doctor: ${examInfo.doctors[0] || 'N/A'}`
+
+    const doctorRule = isMultipleDoctors
+      ? `8. Assign the "Doctor:" field based on the lecture number and the doctor list above`
+      : `8. Every question must include: Doctor: ${examInfo.doctors[0] || 'N/A'}`
+
+    const prompt = `You are a medical education assistant helping format exam questions for the Electronic Exam Platform.
+
+Convert every question I provide into the exact format below without changing meaning, content, or correct answers.
+
+════════════════════════════════════════
+OUTPUT FORMAT (reproduce exactly):
+════════════════════════════════════════
+
+1. Question text?
+A. Choice A
+B. Correct choice *
+C. Choice C
+D. Choice D
+Chapter: Chapter Name
+Lecture: Lecture Name
+Doctor: Doctor Name
+Explanation: Explanation text
+Wrong answers explanation:
+A. Why A is wrong
+C. Why C is wrong
+D. Why D is wrong
+
+════════════════════════════════════════
+SUBJECT STRUCTURE:
+════════════════════════════════════════
+
+Chapters and their numbered lectures (use exact spelling):
+
+${lecturesSection}
+
+════════════════════════════════════════
+DOCTORS:
+════════════════════════════════════════
+
+${doctorInstruction}
+
+════════════════════════════════════════
+EXPLANATION FORMATTING — MN SYNTAX:
+════════════════════════════════════════
+
+Enrich every explanation using these formatting tokens:
+
+  **text**       → Bold — use for drug names, diagnoses, key terms
+  *text*         → Italic — use for emphasis
+  ==text==       → Yellow highlight — use for the single most important concept
+  !!text!!       → Orange callout box — use for critical clinical pearls or warnings
+  ~~text~~       → Green text — use for correct mechanisms or positive findings
+  ::text::       → Blue text — use for pathophysiology keywords
+  __text__       → Underline
+  [Image Slot 1] → Image placeholder — use when a clinical image would help (max 3)
+  [TABLE]
+  | Column 1 | Column 2 |
+  |----------|----------|
+  | Value 1  | Value 2  |
+  [/TABLE]       → Table — use for comparisons, criteria, or classifications
+
+Every explanation must use at least **bold** and ==highlight==. Add !!callout!! for high-yield facts.
+
+════════════════════════════════════════
+RULES:
+════════════════════════════════════════
+
+1. Mark the correct answer with * after a space at the end of that choice line
+2. Use EXACT chapter and lecture names — spelling must match the list above perfectly
+3. Every question requires: question text, choices A–D, correct answer marked with *, chapter, lecture, doctor, explanation
+4. Choice E is optional
+5. Wrong answer explanations are optional but strongly recommended
+6. Output nothing except the formatted questions — no commentary, no markdown, no extra text
+7. Number questions sequentially starting from 1
+${doctorRule}
+
+════════════════════════════════════════
+QUESTIONS TO CONVERT:
+════════════════════════════════════════
+
+`
+
+    navigator.clipboard.writeText(prompt)
+    setCopiedPrompt(true)
+    setTimeout(() => setCopiedPrompt(false), 2000)
+  }
   const detectedCount = rawText.trim() ? (rawText.match(/^\d+\./gm) || []).length : 0
 
   // ── Step badge ────────────────────────────────────────────────────────────
@@ -368,6 +517,49 @@ D. Why D is wrong
                 <div style={{ marginTop:12 }}>
                   <pre style={{ margin:0, fontFamily:'ui-monospace,monospace', fontSize:12, lineHeight:1.7, color:'var(--bi-primary)', whiteSpace:'pre-wrap' }}>{formatTemplate}</pre>
                   <div style={{ fontSize:11.5, color:'var(--bi-primary)', opacity:0.8, marginTop:10 }}>Spacing around ":" is flexible — "Chapter: X", "Chapter:X", "Chapter : X" all work.</div>
+
+                  {/* MN Syntax reference */}
+                  <div style={{ marginTop:16, borderTop:'1px solid var(--bi-primary)', paddingTop:14, opacity:0.85 }}>
+                    <div style={{ fontSize:12, fontWeight:800, color:'var(--bi-primary)', marginBottom:10, letterSpacing:'0.04em', textTransform:'uppercase' }}>MN Syntax — Explanation Formatting</div>
+
+                    {/* Inline tokens */}
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px 20px', marginBottom:12 }}>
+                      {[
+                        { syntax: '**text**',   label: 'Bold'        },
+                        { syntax: '*text*',     label: 'Italic'      },
+                        { syntax: '==text==',   label: 'Highlight'   },
+                        { syntax: '!!text!!',   label: 'Callout box' },
+                        { syntax: '~~text~~',   label: 'Green text'  },
+                        { syntax: '::text::',   label: 'Blue text'   },
+                        { syntax: '__text__',   label: 'Underline'   },
+                      ].map(({ syntax, label }) => (
+                        <div key={label} style={{ display:'flex', alignItems:'center', gap:6, fontSize:11.5 }}>
+                          <code style={{ background:'rgba(255,255,255,0.5)', border:'1px solid var(--bi-primary)', borderRadius:4, padding:'1px 6px', fontFamily:'ui-monospace,monospace', fontSize:11, color:'var(--bi-primary)', whiteSpace:'nowrap' }}>{syntax}</code>
+                          <span style={{ color:'var(--bi-primary)', opacity:0.7 }}>{label}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Image slots */}
+                    <div style={{ background:'rgba(255,255,255,0.4)', border:'1px solid var(--bi-primary)', borderRadius:8, padding:'8px 12px', marginBottom:8, fontSize:11.5, color:'var(--bi-primary)' }}>
+                      <div style={{ fontWeight:700, marginBottom:4 }}>Images — max 3 per explanation (upload after import)</div>
+                      <div style={{ display:'flex', flexDirection:'column', gap:2, fontFamily:'ui-monospace,monospace', fontSize:11 }}>
+                        <span>[Image Slot 1]</span>
+                        <span>[Image Slot 2]</span>
+                        <span>[Image Slot 3]</span>
+                      </div>
+                    </div>
+
+                    {/* Table */}
+                    <div style={{ background:'rgba(255,255,255,0.4)', border:'1px solid var(--bi-primary)', borderRadius:8, padding:'8px 12px', fontSize:11.5, color:'var(--bi-primary)' }}>
+                      <div style={{ fontWeight:700, marginBottom:4 }}>Table</div>
+                      <pre style={{ margin:0, fontFamily:'ui-monospace,monospace', fontSize:11, lineHeight:1.6, color:'var(--bi-primary)', whiteSpace:'pre' }}>{`[TABLE]
+| Column 1 | Column 2 |
+|----------|----------|
+| Value 1  | Value 2  |
+[/TABLE]`}</pre>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -553,22 +745,40 @@ D. Why D is wrong
 
             {/* Exam Info */}
             {examInfo && (
-              <div className="bi-card" style={{ padding:'18px 20px', borderColor:'#3b82f6' }}>
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:7, fontSize:13, fontWeight:800, color:'#3b82f6' }}>
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                    Use these exact names in your questions
-                  </div>
-                  <button className="bi-btn-copy-blue" onClick={copyNames}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                    {copiedNames ? 'Copied!' : 'Copy'}
+              <div className="bi-card" style={{ padding:'14px 18px', borderColor:'#3b82f6', background:'rgba(239,246,255,0.5)' }}>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                  <button
+                    onClick={() => setExamInfoExpanded(v => !v)}
+                    style={{ display:'flex', alignItems:'center', gap:7, background:'none', border:'none', cursor:'pointer', padding:0, fontFamily:'inherit' }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transition:'transform 0.2s', transform: examInfoExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}><polyline points="9 18 15 12 9 6"/></svg>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                    <span style={{ fontSize:13, fontWeight:800, color:'#3b82f6' }}>Subject Information</span>
+                    {!examInfoExpanded && <span style={{ fontSize:11.5, color:'#3b82f6', opacity:0.6, fontWeight:400 }}>— click to expand</span>}
                   </button>
+                  <div style={{ display:'flex', gap:8 }}>
+                    <button className="bi-btn-copy-blue" onClick={copyNames}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                      {copiedNames ? 'Copied!' : 'Copy'}
+                    </button>
+                    <button
+                      onClick={copyAsPrompt}
+                      style={{ display:'flex', alignItems:'center', gap:6, fontSize:11.5, fontWeight:700, color:'#7c3aed', background:'#f5f3ff', border:'1px solid #7c3aed', borderRadius:8, padding:'5px 10px', cursor:'pointer', fontFamily:'inherit', transition:'background 0.15s', flexShrink:0 }}
+                      onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background='#ede9fe'}
+                      onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background='#f5f3ff'}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 8v4l3 3"/><path d="M18 2l4 4-4 4"/><path d="M22 2l-4 4"/></svg>
+                      {copiedPrompt ? 'Copied!' : 'Copy as AI Prompt'}
+                    </button>
+                  </div>
                 </div>
-                <div style={{ fontSize:12.5, lineHeight:1.8, color:'var(--bi-muted)' }}>
-                  <div><strong style={{ color:'var(--bi-fg)' }}>Chapters: </strong>{examInfo.chapters.length > 0 ? examInfo.chapters.join(' · ') : <em>No chapters defined</em>}</div>
-                  <div><strong style={{ color:'var(--bi-fg)' }}>Lectures: </strong>{examInfo.lectures.length > 0 ? examInfo.lectures.join(' · ') : <em>No lectures defined</em>}</div>
-                  <div><strong style={{ color:'var(--bi-fg)' }}>Doctors: </strong>{examInfo.doctors.length > 0 ? examInfo.doctors.join(' · ') : <em>No doctors defined</em>}</div>
-                </div>
+                {examInfoExpanded && (
+                  <div style={{ marginTop:12, fontSize:12.5, lineHeight:1.8, color:'var(--bi-muted)' }}>
+                    <div><strong style={{ color:'var(--bi-fg)' }}>Chapters: </strong>{examInfo.chapters.length > 0 ? examInfo.chapters.join(' · ') : <em>No chapters defined</em>}</div>
+                    <div><strong style={{ color:'var(--bi-fg)' }}>Lectures: </strong>{examInfo.lectures.length > 0 ? examInfo.lectures.join(' · ') : <em>No lectures defined</em>}</div>
+                    <div><strong style={{ color:'var(--bi-fg)' }}>Doctors: </strong>{examInfo.doctors.length > 0 ? examInfo.doctors.join(' · ') : <em>No doctors defined</em>}</div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -640,7 +850,7 @@ D. Why D is wrong
                   <span style={{ fontSize:14.5, fontWeight:800 }}>Questions Preview</span>
                   <span style={{ fontSize:12, color:'var(--bi-muted)' }}>Expand a question to add images before importing</span>
                 </div>
-                <div className="bi-scrollbar" style={{ display:'flex', flexDirection:'column', maxHeight:420, overflowY:'auto' }}>
+                <div className="bi-scrollbar" style={{ display:'flex', flexDirection:'column', maxHeight:700, overflowY:'auto' }}>
                   {parsedQuestions.map((q, qIndex) => (
                     <div key={q.questionNumber} style={{ borderBottom:'1px solid var(--bi-bd)' }}>
                       <div className="bi-q-row" onClick={() => toggleQuestion(q.questionNumber)}>
@@ -677,11 +887,30 @@ D. Why D is wrong
                             {q.lecture    && <span>Lecture: <strong style={{ color:'var(--bi-fg)' }}>{q.lecture}</strong></span>}
                             {q.doctorName && <span>Doctor: <strong style={{ color:'var(--bi-fg)' }}>{q.doctorName}</strong></span>}
                           </div>
-                          {q.explanation && (
-                            <div style={{ fontSize:13, color:'var(--bi-muted)', background:'var(--bi-elev)', borderRadius:10, padding:'10px 14px' }}>
-                              <strong style={{ color:'var(--bi-fg)' }}>Explanation: </strong>{q.explanation}
-                            </div>
-                          )}
+                          {q.explanation && (() => {
+                            const currentSlotImages = stagedExplanationImages[qIndex] ?? { 1: null, 2: null, 3: null }
+                            return (
+                              <ExplanationRenderer
+                                content={q.explanation}
+                                slotImages={currentSlotImages}
+                                onSlotUpload={(slotNumber, file) => {
+                                  const previewUrl = URL.createObjectURL(file)
+                                  setStagedExplanationImages(prev => {
+                                    const updated = {
+                                      ...prev,
+                                      [qIndex]: {
+                                        1: prev[qIndex]?.[1] ?? null,
+                                        2: prev[qIndex]?.[2] ?? null,
+                                        3: prev[qIndex]?.[3] ?? null,
+                                        [slotNumber]: previewUrl,
+                                      }
+                                    }
+                                    return updated
+                                  })
+                                }}
+                              />
+                            )
+                          })()}
                           <div style={{ borderTop:'1px solid var(--bi-bd)', paddingTop:12 }}>
                             <div style={{ fontSize:11.5, fontWeight:700, color:'var(--bi-muted)', textTransform:'uppercase', marginBottom:10, letterSpacing:'0.05em' }}>Images (optional)</div>
                             {(stagedImages[qIndex]?.length||0)>0 && (

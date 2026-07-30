@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { ExplanationRenderer } from '@/components/exam/ExplanationRenderer'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface QuestionImage { image_url: string; display_order: number }
@@ -366,9 +367,8 @@ export default function InteractiveExam({ exam, questions, savedProgress }: Prop
 
             {/* Explanation */}
             {selectedKey && currentQ.explanation && (
-              <div style={{ marginTop: 16, padding: '14px 16px', borderRadius: 13, background: 'color-mix(in srgb, var(--accent-green) 12%, var(--bg-elev))', border: '1px solid var(--accent-green)', animation: 'examFadeIn .25s ease' }}>
-                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.5px', color: 'var(--accent-green)', marginBottom: 6, textTransform: 'uppercase' }}>Explanation</div>
-                <div style={{ fontSize: 14.5, color: 'var(--fg)', lineHeight: 1.6 }}>{currentQ.explanation}</div>
+              <div style={{ marginTop: 16, animation: 'examFadeIn .25s ease' }}>
+                <ExplanationRenderer content={currentQ.explanation} />
               </div>
             )}
           </div>
@@ -653,9 +653,8 @@ export default function InteractiveExam({ exam, questions, savedProgress }: Prop
 
               {/* Explanation */}
               {q.explanation && (
-                <div style={{ marginTop: 14, padding: '12px 16px', borderRadius: 13, background: 'color-mix(in srgb, var(--accent-green) 12%, var(--bg-elev))', border: '1px solid var(--accent-green)' }}>
-                  <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.5px', color: 'var(--accent-green)', marginBottom: 4, textTransform: 'uppercase' }}>Explanation</div>
-                  <div style={{ fontSize: 14, color: 'var(--fg)', lineHeight: 1.6 }}>{q.explanation}</div>
+                <div style={{ marginTop: 14 }}>
+                  <ExplanationRenderer content={q.explanation} />
                 </div>
               )}
             </div>
