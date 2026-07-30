@@ -4,14 +4,16 @@ import Link from 'next/link'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { parseBulkImport, type ParsedQuestion, type ParseError } from '@/features/bulk-import/parser'
-import { Upload, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, ImagePlus, X, Info } from 'lucide-react'
+import { ChevronDown, ChevronUp, ImagePlus, X } from 'lucide-react'
 
 interface Exam { id: string; title: string; batch_id: string }
 interface Batch { id: string; name: string; subject_id: string }
-interface Subject { id: string; name: string }
+interface Subject { id: string; name: string; semester_id: string | null; year_id: string | null }
 interface Doctor { id: string; name: string }
 interface Chapter { id: string; name: string; subject_id: string }
 interface Lecture { id: string; name: string; chapter_id: string }
+interface AcademicYear { id: string; name: string; is_clinical: boolean }
+interface Semester { id: string; name: string; academic_year_id: string }
 
 type ImportStep = 'paste' | 'preview' | 'done'
 
@@ -33,6 +35,14 @@ export default function BulkImportPage() {
   const [doctors, setDoctors] = useState<Doctor[]>([])
   const [allChapters, setAllChapters] = useState<Chapter[]>([])
   const [allLectures, setAllLectures] = useState<Lecture[]>([])
+  const [academicYears, setAcademicYears] = useState<AcademicYear[]>([])
+  const [semesters, setSemesters] = useState<Semester[]>([])
+
+  // Exam selector filters
+  const [filterYear, setFilterYear] = useState('')
+  const [filterSemester, setFilterSemester] = useState('')
+  const [filterSubject, setFilterSubject] = useState('')
+  const [filterBatch, setFilterBatch] = useState('')
 
   const [parsedQuestions, setParsedQuestions] = useState<ParsedQuestion[]>([])
   const [parseErrors, setParseErrors] = useState<ParseError[]>([])
@@ -43,8 +53,12 @@ export default function BulkImportPage() {
   const [isImporting, setIsImporting] = useState(false)
   const [importResult, setImportResult] = useState<{ imported: number; errors: number } | null>(null)
   const [expandedQuestions, setExpandedQuestions] = useState<Set<number>>(new Set())
+  const [copiedFormat, setCopiedFormat] = useState(false)
+const [copiedNames, setCopiedNames] = useState(false)
+const [formatExpanded, setFormatExpanded] = useState(false)
+  const [examSearch, setExamSearch] = useState('')
+  const [expandedSubject, setExpandedSubject] = useState<string | null>(null)
 
-  // Exam info for the info card
   const [examInfo, setExamInfo] = useState<{
     subjectId: string
     chapters: string[]
@@ -54,14 +68,16 @@ export default function BulkImportPage() {
 
   useEffect(() => {
     async function load() {
-      const [{ data: ex }, { data: ba }, { data: su }, { data: do_ }, { data: ch }, { data: le }] =
+      const [{ data: ex }, { data: ba }, { data: su }, { data: do_ }, { data: ch }, { data: le }, { data: yr }, { data: sm }] =
         await Promise.all([
           supabase.from('exams').select('id, title, batch_id').eq('status', 'published').is('deleted_at', null).order('title'),
           supabase.from('batches').select('*'),
-          supabase.from('subjects').select('*'),
+          supabase.from('subjects').select('id, name, semester_id, year_id'),
           supabase.from('doctors').select('*').order('name'),
           supabase.from('chapters').select('*').order('name'),
           supabase.from('lectures').select('*').order('name'),
+          supabase.from('academic_years').select('id, name, is_clinical').order('display_order'),
+          supabase.from('semesters').select('id, name, academic_year_id').order('display_order'),
         ])
       setExams(ex || [])
       setBatches(ba || [])
@@ -69,6 +85,8 @@ export default function BulkImportPage() {
       setDoctors(do_ || [])
       setAllChapters(ch || [])
       setAllLectures(le || [])
+      setAcademicYears(yr || [])
+      setSemesters(sm || [])
     }
     load()
   }, [])
@@ -79,98 +97,52 @@ export default function BulkImportPage() {
     return batch?.subject_id || null
   }
 
-  function handleExamSelect(examId: string) {
+  function handleExamSelect(examId: string, subjectName?: string) {
     setSelectedExam(examId)
     if (!examId) { setExamInfo(null); return }
-
     const subjectId = getSubjectIdForExam(examId)
     if (!subjectId) { setExamInfo(null); return }
-
-    const subjectChapters = allChapters
-      .filter(c => c.subject_id === subjectId)
-      .map(c => c.name)
-
-    const chapterIds = allChapters
-      .filter(c => c.subject_id === subjectId)
-      .map(c => c.id)
-
-    const subjectLectures = allLectures
-      .filter(l => chapterIds.includes(l.chapter_id))
-      .map(l => l.name)
-
-    setExamInfo({
-      subjectId,
-      chapters: subjectChapters,
-      lectures: subjectLectures,
-      doctors: doctors.map(d => d.name),
-    })
+    const subjectChapters = allChapters.filter(c => c.subject_id === subjectId).map(c => c.name)
+    const chapterIds = allChapters.filter(c => c.subject_id === subjectId).map(c => c.id)
+    const subjectLectures = allLectures.filter(l => chapterIds.includes(l.chapter_id)).map(l => l.name)
+    setExamInfo({ subjectId, chapters: subjectChapters, lectures: subjectLectures, doctors: doctors.map(d => d.name) })
+    if (subjectName) setExpandedSubject(subjectName)
   }
 
-  // Validate parsed questions against database values
   function validateAgainstDatabase(questions: ParsedQuestion[]): string[] {
     const errors: string[] = []
     const subjectId = getSubjectIdForExam(selectedExam)
-
-    const validChapterNames = allChapters
-      .filter(c => c.subject_id === subjectId)
-      .map(c => c.name.toLowerCase().trim())
-
+    const validChapterNames = allChapters.filter(c => c.subject_id === subjectId).map(c => c.name.toLowerCase().trim())
     const validDoctorNames = doctors.map(d => d.name.toLowerCase().trim())
-
     for (const q of questions) {
-      // Validate doctor — empty is OK, wrong name is NOT OK
       if (q.doctorName) {
-        const doctorLower = q.doctorName.toLowerCase().trim()
-        if (!validDoctorNames.includes(doctorLower)) {
-          errors.push(
-            `Question ${q.questionNumber}: Doctor "${q.doctorName}" not found in the database. ` +
-            `Available doctors: ${doctors.map(d => d.name).join(', ') || 'none'}`
-          )
-        }
+        if (!validDoctorNames.includes(q.doctorName.toLowerCase().trim()))
+          errors.push(`Question ${q.questionNumber}: Doctor "${q.doctorName}" not found. Available: ${doctors.map(d => d.name).join(', ') || 'none'}`)
       }
-
-      // Validate chapter — empty is OK (warning), wrong name is an error
       if (q.chapter) {
         const chapterLower = q.chapter.toLowerCase().trim()
         if (!validChapterNames.includes(chapterLower)) {
-          errors.push(
-            `Question ${q.questionNumber}: Chapter "${q.chapter}" not found for this subject. ` +
-            `Available chapters: ${examInfo?.chapters.join(', ') || 'none'}`
-          )
+          errors.push(`Question ${q.questionNumber}: Chapter "${q.chapter}" not found. Available: ${examInfo?.chapters.join(', ') || 'none'}`)
         } else if (q.lecture) {
-          // Validate lecture under this chapter
-          const chapter = allChapters.find(
-            c => c.subject_id === subjectId && c.name.toLowerCase().trim() === chapterLower
-          )
+          const chapter = allChapters.find(c => c.subject_id === subjectId && c.name.toLowerCase().trim() === chapterLower)
           if (chapter) {
-            const validLectureNames = allLectures
-              .filter(l => l.chapter_id === chapter.id)
-              .map(l => l.name.toLowerCase().trim())
-
+            const validLectureNames = allLectures.filter(l => l.chapter_id === chapter.id).map(l => l.name.toLowerCase().trim())
             if (!validLectureNames.includes(q.lecture.toLowerCase().trim())) {
-              const chapterLectures = allLectures
-                .filter(l => l.chapter_id === chapter.id)
-                .map(l => l.name)
-              errors.push(
-                `Question ${q.questionNumber}: Lecture "${q.lecture}" not found under chapter "${q.chapter}". ` +
-                `Available lectures: ${chapterLectures.join(', ') || 'none'}`
-              )
+              const chapterLectures = allLectures.filter(l => l.chapter_id === chapter.id).map(l => l.name)
+              errors.push(`Question ${q.questionNumber}: Lecture "${q.lecture}" not found under "${q.chapter}". Available: ${chapterLectures.join(', ') || 'none'}`)
             }
           }
         }
       }
     }
-
     return errors
   }
 
   function handleValidate() {
     if (!selectedExam) { alert('Please select an exam first.'); return }
     if (!rawText.trim()) { alert('Please paste questions first.'); return }
-
     const result = parseBulkImport(rawText)
     const dbErrors = validateAgainstDatabase(result.questions)
-
     setParsedQuestions(result.questions)
     setParseErrors(result.errors)
     setParseWarnings(result.warnings)
@@ -181,10 +153,7 @@ export default function BulkImportPage() {
 
   function addStagedImage(questionIndex: number, file: File) {
     const previewUrl = URL.createObjectURL(file)
-    setStagedImages(prev => ({
-      ...prev,
-      [questionIndex]: [...(prev[questionIndex] || []), { file, previewUrl, caption: '' }],
-    }))
+    setStagedImages(prev => ({ ...prev, [questionIndex]: [...(prev[questionIndex] || []), { file, previewUrl, caption: '' }] }))
   }
 
   function removeStagedImage(questionIndex: number, imageIndex: number) {
@@ -212,92 +181,51 @@ export default function BulkImportPage() {
       const { error } = await supabase.storage.from('question-images').upload(fileName, img.file)
       if (error) continue
       const { data: urlData } = supabase.storage.from('question-images').getPublicUrl(fileName)
-      await supabase.from('question_images').insert({
-        question_id: questionId,
-        image_url: urlData.publicUrl,
-        caption: img.caption.trim() || null,
-        display_order: i + 1,
-      })
+      await supabase.from('question_images').insert({ question_id: questionId, image_url: urlData.publicUrl, caption: img.caption.trim() || null, display_order: i + 1 })
     }
   }
 
   async function handleImport() {
-    if (parseErrors.length > 0 || validationErrors.length > 0) {
-      alert('Please fix all errors before importing.')
-      return
-    }
-
+    if (parseErrors.length > 0 || validationErrors.length > 0) { alert('Please fix all errors before importing.'); return }
     setIsImporting(true)
-    const subjectId = getSubjectIdForExam(selectedExam)
-    let imported = 0
-    let errors = 0
-
+    let imported = 0; let errors = 0
+    const { count: existingCount } = await supabase
+      .from('questions')
+      .select('id', { count: 'exact', head: true })
+      .eq('exam_id', selectedExam)
+      .is('deleted_at', null)
+    const startOrder = (existingCount || 0) + 1
     for (let i = 0; i < parsedQuestions.length; i++) {
       const q = parsedQuestions[i]
-
-      // Find doctor ID
       let doctorId: string | null = null
       if (q.doctorName) {
-        const doctor = doctors.find(
-          d => d.name.toLowerCase().trim() === q.doctorName!.toLowerCase().trim()
-        )
+        const doctor = doctors.find(d => d.name.toLowerCase().trim() === q.doctorName!.toLowerCase().trim())
         doctorId = doctor?.id || null
       }
-
       const { data: inserted, error } = await supabase.from('questions').insert({
-        exam_id: selectedExam,
-        question_text: q.questionText,
-        question_order: i + 1,
-        choice_a: q.choices.a,
-        choice_b: q.choices.b,
-        choice_c: q.choices.c,
-        choice_d: q.choices.d,
-        choice_e: q.choices.e || null,
-        correct_answer: q.correctAnswer,
-        explanation: q.explanation || null,
-        incorrect_explanation_a: q.wrongExplanations?.a || null,
-        incorrect_explanation_b: q.wrongExplanations?.b || null,
-        incorrect_explanation_c: q.wrongExplanations?.c || null,
-        incorrect_explanation_d: q.wrongExplanations?.d || null,
-        incorrect_explanation_e: q.wrongExplanations?.e || null,
-        chapter: q.chapter || null,
-        lecture: q.lecture || null,
+        exam_id: selectedExam, question_text: q.questionText, question_order: startOrder + i,
+        choice_a: q.choices.a, choice_b: q.choices.b, choice_c: q.choices.c, choice_d: q.choices.d, choice_e: q.choices.e || null,
+        correct_answer: q.correctAnswer, explanation: q.explanation || null,
+        incorrect_explanation_a: q.wrongExplanations?.a || null, incorrect_explanation_b: q.wrongExplanations?.b || null,
+        incorrect_explanation_c: q.wrongExplanations?.c || null, incorrect_explanation_d: q.wrongExplanations?.d || null,
+        incorrect_explanation_e: q.wrongExplanations?.e || null, chapter: q.chapter || null, lecture: q.lecture || null,
       }).select('id').single()
-
       if (error || !inserted) { errors++; continue }
       imported++
-
       const images = stagedImages[i] || []
       if (images.length > 0) await uploadImagesForQuestion(inserted.id, images)
-
-      if (doctorId) {
-        await supabase.from('exam_doctors').upsert({ exam_id: selectedExam, doctor_id: doctorId })
-      }
+      if (doctorId) await supabase.from('exam_doctors').upsert({ exam_id: selectedExam, doctor_id: doctorId })
     }
-
-    const { data: existingExam } = await supabase
-      .from('exams').select('question_count').eq('id', selectedExam).single()
-    await supabase.from('exams')
-      .update({ question_count: (existingExam?.question_count || 0) + imported })
-      .eq('id', selectedExam)
-
-    await supabase.from('bulk_imports').insert({
-      questions_imported: imported,
-      errors,
-      warnings: parseWarnings.length,
-    })
-
+    const { data: existingExam } = await supabase.from('exams').select('question_count').eq('id', selectedExam).single()
+    await supabase.from('exams').update({ question_count: (existingExam?.question_count || 0) + imported }).eq('id', selectedExam)
+    await supabase.from('bulk_imports').insert({ questions_imported: imported, errors, warnings: parseWarnings.length })
     setImportResult({ imported, errors })
     setStep('done')
     setIsImporting(false)
   }
 
   function toggleQuestion(num: number) {
-    setExpandedQuestions(prev => {
-      const next = new Set(prev)
-      next.has(num) ? next.delete(num) : next.add(num)
-      return next
-    })
+    setExpandedQuestions(prev => { const next = new Set(prev); next.has(num) ? next.delete(num) : next.add(num); return next })
   }
 
   function getExamLabel(exam: Exam) {
@@ -306,41 +234,7 @@ export default function BulkImportPage() {
     return `${exam.title} — ${subject?.name || ''} (${batch?.name || ''})`
   }
 
-  const allErrors = [...parseErrors.map(e => `Question ${e.questionNumber}: ${e.message}`), ...validationErrors]
-
-  return (
-    <div className="max-w-4xl space-y-6">
-
-      <div>
-        <h1 className="text-2xl font-bold">Bulk Import</h1>
-        <p className="text-muted-foreground">Import multiple questions at once using the standard format</p>
-      </div>
-
-      {/* Steps */}
-      <div className="flex items-center gap-4">
-        {['paste', 'preview', 'done'].map((s, i) => (
-          <div key={s} className="flex items-center gap-2">
-            <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
-              step === s ? 'bg-black text-white' :
-              (step === 'preview' && i === 0) || step === 'done' ? 'bg-green-500 text-white' :
-              'bg-gray-200 text-gray-500'
-            }`}>
-              {((step === 'preview' && i === 0) || step === 'done') && i < ['paste', 'preview', 'done'].indexOf(step) ? '✓' : i + 1}
-            </div>
-            <span className="text-sm font-medium capitalize">{s}</span>
-            {i < 2 && <div className="h-px w-8 bg-gray-300" />}
-          </div>
-        ))}
-      </div>
-
-      {/* STEP 1: PASTE */}
-      {step === 'paste' && (
-        <div className="space-y-4">
-
-          {/* Format Guide */}
-          <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
-            <h2 className="mb-2 font-semibold text-blue-800">Question Format</h2>
-            <pre className="text-xs text-blue-700 whitespace-pre-wrap">{`1. Question text here?
+  const formatTemplate = `1. Question text here?
 A. First choice
 B. Second choice *
 C. Third choice
@@ -355,305 +249,501 @@ A. Why A is wrong
 C. Why C is wrong
 D. Why D is wrong
 
-2. Next question...`}</pre>
-            <p className="mt-2 text-xs text-blue-600">
-              Spacing around ":" is flexible — "Chapter: X", "Chapter:X", "Chapter  :  X" all work.
-            </p>
-          </div>
+2. Next question...`
 
-          {/* Select Exam */}
-          <div className="rounded-xl border border-border/60 bg-card p-4 shadow-sm space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-2">Select Target Exam</label>
-              <select
-                className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-                value={selectedExam}
-                onChange={e => handleExamSelect(e.target.value)}
-              >
-                <option value="">Select an exam to import questions into</option>
-                {exams.map(exam => (
-                  <option key={exam.id} value={exam.id}>{getExamLabel(exam)}</option>
-                ))}
-              </select>
+  function copyFormat() {
+    navigator.clipboard.writeText(formatTemplate)
+    setCopiedFormat(true); setTimeout(() => setCopiedFormat(false), 2000)
+  }
+
+  function copyNames() {
+    if (!examInfo) return
+    const text = `Chapters: ${examInfo.chapters.join(' · ')}\nLectures: ${examInfo.lectures.join(' · ')}\nDoctors: ${examInfo.doctors.join(' · ')}`
+    navigator.clipboard.writeText(text)
+    setCopiedNames(true); setTimeout(() => setCopiedNames(false), 2000)
+  }
+
+  const allErrors = [...parseErrors.map(e => `Question ${e.questionNumber}: ${e.message}`), ...validationErrors]
+  const detectedCount = rawText.trim() ? (rawText.match(/^\d+\./gm) || []).length : 0
+
+  // ── Step badge ────────────────────────────────────────────────────────────
+  function StepBadge({ num, label }: { num: 1 | 2 | 3; label: string }) {
+    const current = step === 'paste' ? 1 : step === 'preview' ? 2 : 3
+    const isDone = num < current
+    const isActive = num === current
+    const bg = isDone ? '#22c55e' : isActive ? 'var(--bi-primary)' : 'var(--bi-soft)'
+    const color = isDone || isActive ? '#fff' : 'var(--bi-muted)'
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0 }}>
+        <span style={{ width: 26, height: 26, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, background: bg, color }}>
+          {isDone ? '✓' : num}
+        </span>
+        <span style={{ fontSize: 13.5, fontWeight: 700, color: isActive ? 'var(--bi-primary)' : 'var(--bi-muted)' }}>{label}</span>
+      </div>
+    )
+  }
+
+  // ── CSS ───────────────────────────────────────────────────────────────────
+  const css = `
+    .bi-root {
+      --bi-bg:      oklch(98% 0.006 55);
+      --bi-elev:    oklch(100% 0 0);
+      --bi-soft:    oklch(96% 0.009 55);
+      --bi-fg:      oklch(22% 0.02 50);
+      --bi-muted:   oklch(46% 0.02 50);
+      --bi-bd:      oklch(89% 0.012 50);
+      --bi-primary: oklch(50% 0.19 25);
+      --bi-psoft:   oklch(94% 0.035 25);
+      --bi-shadow:  rgba(20,10,10,0.08);
+    }
+    .dark .bi-root {
+      --bi-bg:      oklch(18% 0.01 50);
+      --bi-elev:    oklch(22% 0.012 50);
+      --bi-soft:    oklch(20% 0.01 50);
+      --bi-fg:      oklch(92% 0.008 50);
+      --bi-muted:   oklch(62% 0.015 50);
+      --bi-bd:      oklch(32% 0.015 50);
+      --bi-primary: oklch(68% 0.18 25);
+      --bi-psoft:   oklch(28% 0.06 25);
+      --bi-shadow:  rgba(0,0,0,0.35);
+    }
+    @keyframes bi-fade { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+    .bi-fade { animation: bi-fade 0.35s ease-out; }
+    .bi-card { background: var(--bi-elev); border: 1px solid var(--bi-bd); border-radius: 18px; }
+    .bi-input { width:100%; border:1px solid var(--bi-bd); background:var(--bi-soft); color:var(--bi-fg); border-radius:10px; padding:10px 13px; font-size:13.5px; outline:none; font-family:inherit; transition:border-color 0.15s,box-shadow 0.15s; }
+    .bi-input:focus { border-color:var(--bi-primary); box-shadow:0 0 0 3px var(--bi-psoft); }
+    .bi-textarea { width:100%; border:1px solid var(--bi-bd); background:var(--bi-soft); color:var(--bi-fg); border-radius:10px; padding:10px 13px; font-size:12.5px; outline:none; font-family:ui-monospace,monospace; line-height:1.6; resize:vertical; min-height:220px; transition:border-color 0.15s,box-shadow 0.15s; box-sizing:border-box; }
+    .bi-textarea:focus { border-color:var(--bi-primary); box-shadow:0 0 0 3px var(--bi-psoft); }
+    .bi-btn-primary { background:var(--bi-primary); color:#fff; border:none; border-radius:11px; padding:11px 20px; font-size:13.5px; font-weight:700; cursor:pointer; font-family:inherit; transition:opacity 0.15s,transform 0.15s; display:flex; align-items:center; gap:7px; white-space:nowrap; }
+    .bi-btn-primary:hover { opacity:0.9; transform:translateY(-1px); }
+    .bi-btn-primary:disabled { opacity:0.5; cursor:not-allowed; transform:none; }
+    .bi-btn-ghost { background:var(--bi-soft); color:var(--bi-fg); border:1px solid var(--bi-bd); border-radius:11px; padding:10px 18px; font-size:13.5px; font-weight:700; cursor:pointer; font-family:inherit; transition:background 0.15s; display:flex; align-items:center; gap:7px; white-space:nowrap; }
+    .bi-btn-ghost:hover { background:var(--bi-bd); }
+    .bi-btn-copy { display:flex; align-items:center; gap:6px; font-size:11.5px; font-weight:700; color:var(--bi-primary); background:var(--bi-elev); border:1px solid var(--bi-primary); border-radius:8px; padding:5px 10px; cursor:pointer; font-family:inherit; transition:background 0.15s; }
+    .bi-btn-copy:hover { background:var(--bi-psoft); }
+    .bi-btn-copy-blue { display:flex; align-items:center; gap:6px; font-size:11.5px; font-weight:700; color:#3b82f6; background:var(--bi-elev); border:1px solid #3b82f6; border-radius:8px; padding:5px 10px; cursor:pointer; font-family:inherit; transition:background 0.15s; flex-shrink:0; }
+    .bi-btn-copy-blue:hover { background:rgba(59,130,246,0.08); }
+    .bi-q-row { display:flex; align-items:center; justify-content:space-between; padding:14px 20px; cursor:pointer; transition:background 0.12s; }
+    .bi-q-row:hover { background:var(--bi-soft); }
+    .bi-scrollbar::-webkit-scrollbar { width:8px; }
+    .bi-scrollbar::-webkit-scrollbar-thumb { background:var(--bi-bd); border-radius:8px; }
+  `
+
+  return (
+    <>
+      <style>{css}</style>
+      <div className="bi-root bi-fade" style={{ fontFamily:"'Plus Jakarta Sans',system-ui,sans-serif", color:'var(--bi-fg)', maxWidth:1280, margin:'0 auto', padding:'28px 32px 64px', width:'100%' }}>
+
+        {/* Header */}
+        <h1 style={{ margin:'0 0 4px', fontSize:26, fontWeight:800 }}>Bulk Import</h1>
+        <p style={{ margin:'0 0 22px', fontSize:14, color:'var(--bi-muted)' }}>Import multiple questions at once using the standard format.</p>
+
+        {/* Steps */}
+        <div style={{ display:'flex', alignItems:'center', width:'100%', marginBottom:26 }}>
+          <StepBadge num={1} label="Paste" />
+          <div style={{ flex:'1 1 0%', height:2, background:'var(--bi-bd)', margin:'0 14px' }} />
+          <StepBadge num={2} label="Preview" />
+          <div style={{ flex:'1 1 0%', height:2, background:'var(--bi-bd)', margin:'0 14px' }} />
+          <StepBadge num={3} label="Done" />
+        </div>
+
+        {/* ── STEP 1 ── */}
+        {step === 'paste' && (
+          <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
+
+            {/* Format Card */}
+            <div className="bi-card" style={{ padding:'14px 18px', background:'var(--bi-psoft)', borderColor:'transparent' }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                <button onClick={() => setFormatExpanded(v => !v)} style={{ display:'flex', alignItems:'center', gap:7, background:'none', border:'none', cursor:'pointer', padding:0, fontFamily:'inherit' }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--bi-primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transition:'transform 0.2s', transform: formatExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}><polyline points="9 18 15 12 9 6"/></svg>
+                  <span style={{ fontSize:13.5, fontWeight:800, color:'var(--bi-primary)' }}>Question Format</span>
+                  {!formatExpanded && <span style={{ fontSize:11.5, color:'var(--bi-primary)', opacity:0.6, fontWeight:400 }}>— click to expand</span>}
+                </button>
+                <button className="bi-btn-copy" onClick={copyFormat}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  {copiedFormat ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+              {formatExpanded && (
+                <div style={{ marginTop:12 }}>
+                  <pre style={{ margin:0, fontFamily:'ui-monospace,monospace', fontSize:12, lineHeight:1.7, color:'var(--bi-primary)', whiteSpace:'pre-wrap' }}>{formatTemplate}</pre>
+                  <div style={{ fontSize:11.5, color:'var(--bi-primary)', opacity:0.8, marginTop:10 }}>Spacing around ":" is flexible — "Chapter: X", "Chapter:X", "Chapter : X" all work.</div>
+                </div>
+              )}
             </div>
 
-            {/* Exam Info Card */}
-            {examInfo && (
-              <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30 p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <Info className="h-4 w-4 text-blue-600" />
-                  <p className="text-sm font-semibold text-blue-800 dark:text-blue-200">
-                    Use these exact names in your questions
-                  </p>
+            {/* Select Exam — New Design */}
+            <div className="bi-card" style={{ padding:22 }}>
+              <div style={{ fontSize:14, fontWeight:800, marginBottom:16 }}>Select Target Exam</div>
+
+              <div style={{ display:'grid', gridTemplateColumns:'220px 1fr', gap:16, alignItems:'start' }}>
+
+                {/* Left: Filters */}
+                <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                  <select className="bi-input" value={filterYear} onChange={e => { setFilterYear(e.target.value); setFilterSemester(''); setFilterSubject(''); setFilterBatch(''); setSelectedExam(''); setExamInfo(null); setExamSearch(''); setExpandedSubject(null) }}>
+                    <option value="">Select Year...</option>
+                    {academicYears.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
+                  </select>
+
+                  {filterYear && !academicYears.find(y => y.id === filterYear)?.is_clinical && (
+                    <select className="bi-input" style={{ background:'var(--bi-psoft)', color:'var(--bi-primary)', fontWeight:700 }} value={filterSemester} onChange={e => { setFilterSemester(e.target.value); setFilterSubject(''); setFilterBatch(''); setSelectedExam(''); setExamInfo(null); setExamSearch(''); setExpandedSubject(null) }}>
+                      <option value="">Select Semester...</option>
+                      {semesters.filter(s => s.academic_year_id === filterYear).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  )}
+
+                  <select className="bi-input" value={filterSubject} onChange={e => { setFilterSubject(e.target.value); setFilterBatch(''); setSelectedExam(''); setExamInfo(null); setExamSearch(''); setExpandedSubject(e.target.value ? subjects.find(s=>s.id===e.target.value)?.name||null : null) }}>
+                    <option value="">All Subjects</option>
+                    {(() => {
+                      let filtered = subjects
+                      if (filterYear) {
+                        const yearObj = academicYears.find(y => y.id === filterYear)
+                        if (yearObj?.is_clinical) {
+                          filtered = filtered.filter(s => s.year_id === filterYear)
+                        } else {
+                          const yearSems = semesters.filter(s => s.academic_year_id === filterYear).map(s => s.id)
+                          filtered = filtered.filter(s => s.semester_id && yearSems.includes(s.semester_id))
+                          if (filterSemester) filtered = filtered.filter(s => s.semester_id === filterSemester)
+                        }
+                      }
+                      return filtered.map(s => <option key={s.id} value={s.id}>{s.name}</option>)
+                    })()}
+                  </select>
+
+                  <select className="bi-input" value={filterBatch} onChange={e => { setFilterBatch(e.target.value); setSelectedExam(''); setExamInfo(null) }} disabled={!filterSubject}>
+                    <option value="">All Batches</option>
+                    {batches.filter(b => b.subject_id === filterSubject).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+
+                  {/* Match count chip */}
+                  {(() => {
+                    const readyForExams = !!filterYear && (academicYears.find(y=>y.id===filterYear)?.is_clinical || !!filterSemester || semesters.filter(s=>s.academic_year_id===filterYear).length===0)
+                    if (!readyForExams) return null
+                    let allFiltered = exams
+                    if (filterBatch) { allFiltered = allFiltered.filter(e => e.batch_id === filterBatch) }
+                    else if (filterSubject) { const sb = batches.filter(b=>b.subject_id===filterSubject).map(b=>b.id); allFiltered=allFiltered.filter(e=>sb.includes(e.batch_id)) }
+                    else { const yearObj=academicYears.find(y=>y.id===filterYear); let sids:string[]; if(yearObj?.is_clinical){sids=subjects.filter(s=>s.year_id===filterYear).map(s=>s.id)}else{const ys=semesters.filter(s=>s.academic_year_id===filterYear).map(s=>s.id);let ss=subjects.filter(s=>s.semester_id&&ys.includes(s.semester_id));if(filterSemester)ss=ss.filter(s=>s.semester_id===filterSemester);sids=ss.map(s=>s.id)}; const yb=batches.filter(b=>sids.includes(b.subject_id)).map(b=>b.id); allFiltered=allFiltered.filter(e=>yb.includes(e.batch_id)) }
+                    return (
+                      <div style={{ marginTop:6, padding:'12px 13px', borderRadius:10, background:'var(--bi-psoft)', fontSize:11.5, lineHeight:1.6, color:'var(--bi-primary)' }}>
+                        <strong>{allFiltered.length}</strong> exam(s) match these filters.
+                      </div>
+                    )
+                  })()}
                 </div>
-                <div className="space-y-2 text-xs text-blue-700 dark:text-blue-300">
-                  <div>
-                    <span className="font-semibold">Chapters: </span>
-                    {examInfo.chapters.length > 0
-                      ? examInfo.chapters.join(' · ')
-                      : <span className="italic">No chapters defined</span>
-                    }
+
+                {/* Right: Exams panel */}
+                <div style={{ display:'flex', flexDirection:'column', gap:10, minWidth:0 }}>
+                  {(() => {
+                    const isPreclinical = filterYear && !academicYears.find(y=>y.id===filterYear)?.is_clinical && semesters.filter(s=>s.academic_year_id===filterYear).length>0
+                    const readyForExams = !!filterYear && (!isPreclinical || !!filterSemester)
+                    const promptText = !filterYear ? 'Select an academic year' : 'Select a semester'
+
+                    if (!readyForExams) return (
+                      <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minHeight:260, gap:8, color:'var(--bi-muted)', textAlign:'center', padding:20, border:'1px dashed var(--bi-bd)', borderRadius:14, background:'var(--bi-soft)' }}>
+                        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity:0.5 }}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                        <span style={{ fontSize:13, fontWeight:700 }}>{promptText}</span>
+                        <span style={{ fontSize:11.5 }}>Exams appear once these are set</span>
+                      </div>
+                    )
+
+                    // Build filtered exams
+                    let filteredExams = exams
+                    if (filterBatch) { filteredExams = filteredExams.filter(e => e.batch_id === filterBatch) }
+                    else if (filterSubject) { const sb = batches.filter(b=>b.subject_id===filterSubject).map(b=>b.id); filteredExams=filteredExams.filter(e=>sb.includes(e.batch_id)) }
+                    else { const yearObj=academicYears.find(y=>y.id===filterYear); let sids:string[]; if(yearObj?.is_clinical){sids=subjects.filter(s=>s.year_id===filterYear).map(s=>s.id)}else{const ys=semesters.filter(s=>s.academic_year_id===filterYear).map(s=>s.id);let ss=subjects.filter(s=>s.semester_id&&ys.includes(s.semester_id));if(filterSemester)ss=ss.filter(s=>s.semester_id===filterSemester);sids=ss.map(s=>s.id)}; const yb=batches.filter(b=>sids.includes(b.subject_id)).map(b=>b.id); filteredExams=filteredExams.filter(e=>yb.includes(e.batch_id)) }
+
+                    const q = examSearch.trim().toLowerCase()
+                    if (q) filteredExams = filteredExams.filter(e => e.title.toLowerCase().includes(q) || (subjects.find(s=>s.id===batches.find(b=>b.id===e.batch_id)?.subject_id)?.name||'').toLowerCase().includes(q))
+
+                    // Group by subject
+                    const grouped: Record<string, { subjectName: string; exams: typeof filteredExams }> = {}
+                    filteredExams.forEach(exam => {
+                      const batch = batches.find(b => b.id === exam.batch_id)
+                      const subject = subjects.find(s => s.id === batch?.subject_id)
+                      const subName = subject?.name || 'Unknown'
+                      if (!grouped[subName]) grouped[subName] = { subjectName: subName, exams: [] }
+                      grouped[subName].exams.push(exam)
+                    })
+
+                    return (
+                      <>
+                        {/* Search + selected pill */}
+                        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                          <div style={{ position:'relative', flex:1 }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--bi-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position:'absolute', left:12, top:'50%', transform:'translateY(-50%)' }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            <input type="text" placeholder="Search exams..." value={examSearch} onChange={e => setExamSearch(e.target.value)} className="bi-input" style={{ paddingLeft:34 }} />
+                          </div>
+                          {selectedExam && (
+                            <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0, fontSize:11.5, fontWeight:800, color:'var(--bi-primary)', background:'var(--bi-psoft)', borderRadius:20, padding:'6px 8px 6px 12px', whiteSpace:'nowrap' }}>
+                              1 selected
+                              <button onClick={() => { setSelectedExam(''); setExamInfo(null) }} style={{ width:18, height:18, borderRadius:'50%', border:'none', background:'var(--bi-primary)', color:'#fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', padding:0 }}>
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Grouped list */}
+                        <div style={{ border:'1px solid var(--bi-bd)', borderRadius:14, overflow:'hidden' }}>
+                          <div className="bi-scrollbar" style={{ maxHeight:480, overflowY:'auto' }}>
+                            {Object.keys(grouped).length === 0 ? (
+                              <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minHeight:200, gap:8, color:'var(--bi-muted)', textAlign:'center', padding:20 }}>
+                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity:0.4 }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                <span style={{ fontSize:13 }}>No exams found</span>
+                                <span style={{ fontSize:11.5 }}>Try adjusting the search or filters</span>
+                              </div>
+                            ) : Object.values(grouped).map(group => {
+                              const isExpanded = expandedSubject === group.subjectName
+                              return (
+                                <div key={group.subjectName}>
+                                  {/* Subject header */}
+                                  <div
+                                    onClick={() => setExpandedSubject(isExpanded ? null : group.subjectName)}
+                                    style={{ position:'sticky', top:0, zIndex:1, display:'flex', alignItems:'center', justifyContent:'space-between', padding: isExpanded ? '9px 16px' : '6px 16px', background: isExpanded ? 'var(--bi-psoft)' : 'var(--bi-soft)', borderBottom:'1px solid var(--bi-bd)', cursor:'pointer', transition:'padding 0.15s' }}
+                                  >
+                                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                                      <span style={{ fontSize: isExpanded ? '11.5px' : '10.5px', fontWeight:800, color: isExpanded ? 'var(--bi-primary)' : 'var(--bi-muted)', textTransform:'uppercase', letterSpacing:'0.04em' }}>{group.subjectName}</span>
+                                      <span style={{ fontSize:11, fontWeight:700, color:'var(--bi-muted)', background:'var(--bi-elev)', border:'1px solid var(--bi-bd)', borderRadius:20, padding:'1px 8px' }}>{group.exams.length}</span>
+                                    </div>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--bi-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0)', transition:'transform 0.2s' }}><polyline points="6 9 12 15 18 9"/></svg>
+                                  </div>
+
+                                  {/* Exam rows */}
+                                  {isExpanded && (
+                                    <div style={{ maxHeight:280, overflowY:'auto' }}>
+                                      {group.exams.map((exam, idx) => {
+                                        const isSelected = selectedExam === exam.id
+                                        const batch = batches.find(b => b.id === exam.batch_id)
+                                        return (
+                                          <div
+                                            key={exam.id}
+                                            onClick={() => handleExamSelect(exam.id, group.subjectName)}
+                                            style={{ display:'flex', alignItems:'center', gap:12, padding:'11px 16px 11px 13px', cursor:'pointer', borderBottom: idx < group.exams.length-1 ? '1px solid var(--bi-bd)' : 'none', background: isSelected ? 'var(--bi-psoft)' : 'transparent', borderLeft:`3px solid ${isSelected ? 'var(--bi-primary)' : 'transparent'}`, transition:'background 0.12s' }}
+                                            onMouseEnter={e => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background='var(--bi-soft)' }}
+                                            onMouseLeave={e => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background='transparent' }}
+                                          >
+                                            <div style={{ width:34, height:34, borderRadius:10, flexShrink:0, background: isSelected ? 'var(--bi-primary)' : 'var(--bi-soft)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={isSelected ? '#fff' : 'var(--bi-muted)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                                            </div>
+                                            <div style={{ flex:1, minWidth:0 }}>
+                                              <div style={{ fontSize:13.5, fontWeight:700, color: isSelected ? 'var(--bi-primary)' : 'var(--bi-fg)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{exam.title}</div>
+                                              <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:2 }}>
+                                                <span style={{ fontSize:11.5, color:'var(--bi-muted)', whiteSpace:'nowrap' }}>{group.subjectName}</span>
+                                                {batch && <span style={{ fontSize:11.5, fontWeight:600, padding:'1px 8px', borderRadius:20, background: isSelected ? 'var(--bi-primary)' : 'var(--bi-soft)', color: isSelected ? '#fff' : 'var(--bi-muted)', whiteSpace:'nowrap' }}>{batch.name}</span>}
+                                              </div>
+                                            </div>
+                                            {isSelected && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--bi-primary)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink:0 }}><polyline points="20 6 9 17 4 12"/></svg>}
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      </>
+                    )
+                  })()}
+                </div>
+
+              </div>
+            </div>
+
+            {/* Exam Info */}
+            {examInfo && (
+              <div className="bi-card" style={{ padding:'18px 20px', borderColor:'#3b82f6' }}>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:7, fontSize:13, fontWeight:800, color:'#3b82f6' }}>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                    Use these exact names in your questions
                   </div>
-                  <div>
-                    <span className="font-semibold">Lectures: </span>
-                    {examInfo.lectures.length > 0
-                      ? examInfo.lectures.join(' · ')
-                      : <span className="italic">No lectures defined</span>
-                    }
-                  </div>
-                  <div>
-                    <span className="font-semibold">Doctors: </span>
-                    {examInfo.doctors.length > 0
-                      ? examInfo.doctors.join(' · ')
-                      : <span className="italic">No doctors defined</span>
-                    }
-                  </div>
+                  <button className="bi-btn-copy-blue" onClick={copyNames}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    {copiedNames ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
+                <div style={{ fontSize:12.5, lineHeight:1.8, color:'var(--bi-muted)' }}>
+                  <div><strong style={{ color:'var(--bi-fg)' }}>Chapters: </strong>{examInfo.chapters.length > 0 ? examInfo.chapters.join(' · ') : <em>No chapters defined</em>}</div>
+                  <div><strong style={{ color:'var(--bi-fg)' }}>Lectures: </strong>{examInfo.lectures.length > 0 ? examInfo.lectures.join(' · ') : <em>No lectures defined</em>}</div>
+                  <div><strong style={{ color:'var(--bi-fg)' }}>Doctors: </strong>{examInfo.doctors.length > 0 ? examInfo.doctors.join(' · ') : <em>No doctors defined</em>}</div>
                 </div>
               </div>
             )}
-          </div>
 
-          {/* Paste Area */}
-          <div className="rounded-xl border border-border/60 bg-card p-4 shadow-sm">
-            <label className="block text-sm font-medium mb-2">Paste Questions</label>
-            <textarea
-              className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 font-mono"
-              rows={20}
-              placeholder="Paste your questions here using the format shown above..."
-              value={rawText}
-              onChange={e => setRawText(e.target.value)}
-            />
-            <div className="mt-2 flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">
-                {rawText.trim() ? 'Questions detected' : 'No questions pasted yet'}
-              </p>
-              <button
-                onClick={handleValidate}
-                disabled={!rawText.trim() || !selectedExam}
-                className="flex items-center gap-2 rounded-lg bg-black px-5 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
-              >
-                <Upload className="h-4 w-4" />
-                Validate & Preview
+            {/* Paste Area */}
+            <div className="bi-card" style={{ padding:22 }}>
+              <div style={{ fontSize:14, fontWeight:800, marginBottom:10 }}>Paste Questions</div>
+              <textarea className="bi-textarea" placeholder="Paste your questions here using the format shown above..." value={rawText} onChange={e => setRawText(e.target.value)} />
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:14, flexWrap:'wrap', gap:10 }}>
+                <span style={{ fontSize:12, color:'var(--bi-muted)' }}>{detectedCount > 0 ? `${detectedCount} question(s) detected` : '0 question(s) detected'}</span>
+                <button className="bi-btn-primary" onClick={handleValidate} disabled={!rawText.trim() || !selectedExam}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  Validate &amp; Preview
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── STEP 2 ── */}
+        {step === 'preview' && (
+          <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
+
+            {/* Stats */}
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:14 }}>
+              <div style={{ background:'#dcfce7', borderRadius:16, padding:20, textAlign:'center' }}>
+                <div style={{ fontSize:28, fontWeight:800, color:'#16a34a' }}>{parsedQuestions.length}</div>
+                <div style={{ fontSize:12.5, fontWeight:700, color:'#16a34a', marginTop:4 }}>Questions Ready</div>
+              </div>
+              <div style={{ background:allErrors.length>0?'#fee2e2':'var(--bi-soft)', borderRadius:16, padding:20, textAlign:'center' }}>
+                <div style={{ fontSize:28, fontWeight:800, color:allErrors.length>0?'#dc2626':'var(--bi-muted)' }}>{allErrors.length}</div>
+                <div style={{ fontSize:12.5, fontWeight:700, color:allErrors.length>0?'#dc2626':'var(--bi-muted)', marginTop:4 }}>Errors</div>
+              </div>
+              <div style={{ background:parseWarnings.length>0?'#ffedd5':'var(--bi-soft)', borderRadius:16, padding:20, textAlign:'center' }}>
+                <div style={{ fontSize:28, fontWeight:800, color:parseWarnings.length>0?'#ea580c':'var(--bi-muted)' }}>{parseWarnings.length}</div>
+                <div style={{ fontSize:12.5, fontWeight:700, color:parseWarnings.length>0?'#ea580c':'var(--bi-muted)', marginTop:4 }}>Warnings</div>
+              </div>
+            </div>
+
+            {/* Errors */}
+            {allErrors.length > 0 && (
+              <div className="bi-card" style={{ padding:'18px 20px', borderColor:'#fca5a5', background:'#fef2f2' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                  <span style={{ fontSize:13.5, fontWeight:800, color:'#dc2626' }}>Errors — Must fix before importing</span>
+                </div>
+                <ul style={{ margin:0, padding:'0 0 0 18px', display:'flex', flexDirection:'column', gap:4 }}>
+                  {allErrors.map((err, i) => <li key={i} style={{ fontSize:13, color:'#b91c1c' }}>{err}</li>)}
+                </ul>
+              </div>
+            )}
+
+            {/* Warnings */}
+            {parseWarnings.length > 0 && (
+              <div className="bi-card" style={{ padding:'18px 20px', borderColor:'#fcd34d', background:'#fffbeb' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  <span style={{ fontSize:13.5, fontWeight:800, color:'#d97706' }}>Warnings</span>
+                </div>
+                <ul style={{ margin:0, padding:'0 0 0 18px', display:'flex', flexDirection:'column', gap:4 }}>
+                  {parseWarnings.map((w, i) => <li key={i} style={{ fontSize:13, color:'#b45309' }}>{w}</li>)}
+                </ul>
+              </div>
+            )}
+
+            {/* Questions */}
+            {parsedQuestions.length > 0 && (
+              <div className="bi-card" style={{ overflow:'hidden' }}>
+                <div style={{ padding:'18px 20px', borderBottom:'1px solid var(--bi-bd)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                  <span style={{ fontSize:14.5, fontWeight:800 }}>Questions Preview</span>
+                  <span style={{ fontSize:12, color:'var(--bi-muted)' }}>Expand a question to add images before importing</span>
+                </div>
+                <div className="bi-scrollbar" style={{ display:'flex', flexDirection:'column', maxHeight:420, overflowY:'auto' }}>
+                  {parsedQuestions.map((q, qIndex) => (
+                    <div key={q.questionNumber} style={{ borderBottom:'1px solid var(--bi-bd)' }}>
+                      <div className="bi-q-row" onClick={() => toggleQuestion(q.questionNumber)}>
+                        <div style={{ display:'flex', alignItems:'center', gap:12, minWidth:0 }}>
+                          <span style={{ width:26, height:26, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, fontWeight:800, background:'var(--bi-psoft)', color:'var(--bi-primary)', flexShrink:0 }}>
+                            {q.questionNumber}
+                          </span>
+                          <span style={{ fontSize:13.5, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{q.questionText}</span>
+                        </div>
+                        <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0, marginLeft:12 }}>
+                          {(stagedImages[qIndex]?.length||0)>0 && <span style={{ fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:20, background:'rgba(59,130,246,0.1)', color:'#3b82f6' }}>{stagedImages[qIndex].length} img</span>}
+                          {q.chapter && <span style={{ fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:20, background:'var(--bi-psoft)', color:'var(--bi-primary)' }}>{q.chapter}</span>}
+                          {expandedQuestions.has(q.questionNumber) ? <ChevronUp width={15} height={15} style={{ color:'var(--bi-muted)' }}/> : <ChevronDown width={15} height={15} style={{ color:'var(--bi-muted)'}}/>}
+                        </div>
+                      </div>
+
+                      {expandedQuestions.has(q.questionNumber) && (
+                        <div style={{ padding:'16px 20px', background:'var(--bi-soft)', borderTop:'1px solid var(--bi-bd)', display:'flex', flexDirection:'column', gap:12 }}>
+                          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                            {(['a','b','c','d','e'] as const).map(letter => {
+                              const choice = q.choices[letter]; if (!choice) return null
+                              const isCorrect = q.correctAnswer === letter
+                              return (
+                                <div key={letter} style={{ display:'flex', alignItems:'flex-start', gap:8, padding:'8px 12px', borderRadius:10, fontSize:13, background:isCorrect?'#dcfce7':'var(--bi-elev)', color:isCorrect?'#15803d':'var(--bi-fg)', fontWeight:isCorrect?700:400 }}>
+                                  <span style={{ fontWeight:800, textTransform:'uppercase', flexShrink:0 }}>{letter}.</span>
+                                  <span style={{ flex:1 }}>{choice}</span>
+                                  {isCorrect && <span style={{ fontSize:11, color:'#16a34a', flexShrink:0 }}>✓ Correct</span>}
+                                </div>
+                              )
+                            })}
+                          </div>
+                          <div style={{ display:'flex', flexWrap:'wrap', gap:12, fontSize:12.5, color:'var(--bi-muted)' }}>
+                            {q.chapter    && <span>Chapter: <strong style={{ color:'var(--bi-fg)' }}>{q.chapter}</strong></span>}
+                            {q.lecture    && <span>Lecture: <strong style={{ color:'var(--bi-fg)' }}>{q.lecture}</strong></span>}
+                            {q.doctorName && <span>Doctor: <strong style={{ color:'var(--bi-fg)' }}>{q.doctorName}</strong></span>}
+                          </div>
+                          {q.explanation && (
+                            <div style={{ fontSize:13, color:'var(--bi-muted)', background:'var(--bi-elev)', borderRadius:10, padding:'10px 14px' }}>
+                              <strong style={{ color:'var(--bi-fg)' }}>Explanation: </strong>{q.explanation}
+                            </div>
+                          )}
+                          <div style={{ borderTop:'1px solid var(--bi-bd)', paddingTop:12 }}>
+                            <div style={{ fontSize:11.5, fontWeight:700, color:'var(--bi-muted)', textTransform:'uppercase', marginBottom:10, letterSpacing:'0.05em' }}>Images (optional)</div>
+                            {(stagedImages[qIndex]?.length||0)>0 && (
+                              <div style={{ display:'flex', flexWrap:'wrap', gap:10, marginBottom:10 }}>
+                                {stagedImages[qIndex].map((img, imgIndex) => (
+                                  <div key={imgIndex} style={{ position:'relative' }}>
+                                    <img src={img.previewUrl} alt="preview" style={{ width:80, height:80, borderRadius:10, objectFit:'cover', border:'1px solid var(--bi-bd)', display:'block' }}/>
+                                    <button onClick={() => removeStagedImage(qIndex,imgIndex)} style={{ position:'absolute', top:-6, right:-6, width:20, height:20, borderRadius:'50%', background:'#ef4444', color:'#fff', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                                      <X width={11} height={11}/>
+                                    </button>
+                                    <input type="text" placeholder="Caption..." value={img.caption} onChange={e=>updateStagedCaption(qIndex,imgIndex,e.target.value)} style={{ marginTop:4, width:80, borderRadius:6, border:'1px solid var(--bi-bd)', background:'var(--bi-elev)', color:'var(--bi-fg)', padding:'2px 6px', fontSize:11, outline:'none' }}/>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <label style={{ display:'flex', alignItems:'center', gap:7, width:'fit-content', cursor:'pointer', borderRadius:9, border:'1px solid var(--bi-bd)', padding:'7px 13px', fontSize:12.5, fontWeight:600, color:'var(--bi-muted)', background:'var(--bi-elev)' }}>
+                              <ImagePlus width={14} height={14}/>
+                              Add Image
+                              <input type="file" accept="image/*" style={{ display:'none' }} onChange={e=>{ const file=e.target.files?.[0]; if(file) addStagedImage(qIndex,file); e.target.value='' }}/>
+                            </label>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={{ display:'flex', gap:10 }}>
+              <button className="bi-btn-ghost" onClick={() => setStep('paste')}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                Back
+              </button>
+              <button className="bi-btn-primary" onClick={handleImport} disabled={isImporting||allErrors.length>0||parsedQuestions.length===0}>
+                {isImporting ? 'Importing...' : `Import ${parsedQuestions.length} Questions`}
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* STEP 2: PREVIEW */}
-      {step === 'preview' && (
-        <div className="space-y-4">
-
-          <div className="grid grid-cols-3 gap-4">
-            <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-center">
-              <p className="text-2xl font-bold text-green-700">{parsedQuestions.length}</p>
-              <p className="text-sm text-green-600">Questions Ready</p>
+        {/* ── STEP 3 ── */}
+        {step === 'done' && importResult && (
+          <div className="bi-card" style={{ padding:'60px 40px', textAlign:'center' }}>
+            <div style={{ width:64, height:64, borderRadius:'50%', background:'#dcfce7', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 20px' }}>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
-            <div className={`rounded-xl border p-4 text-center ${allErrors.length > 0 ? 'border-red-200 bg-red-50' : 'border-border/60 bg-muted/30'}`}>
-              <p className={`text-2xl font-bold ${allErrors.length > 0 ? 'text-red-700' : 'text-muted-foreground'}`}>
-                {allErrors.length}
-              </p>
-              <p className={`text-sm ${allErrors.length > 0 ? 'text-red-600' : 'text-muted-foreground'}`}>Errors</p>
-            </div>
-            <div className={`rounded-xl border p-4 text-center ${parseWarnings.length > 0 ? 'border-yellow-200 bg-yellow-50' : 'border-border/60 bg-muted/30'}`}>
-              <p className={`text-2xl font-bold ${parseWarnings.length > 0 ? 'text-yellow-700' : 'text-muted-foreground'}`}>
-                {parseWarnings.length}
-              </p>
-              <p className={`text-sm ${parseWarnings.length > 0 ? 'text-yellow-600' : 'text-muted-foreground'}`}>Warnings</p>
+            <h2 style={{ margin:'0 0 8px', fontSize:22, fontWeight:800 }}>Import Complete!</h2>
+            <p style={{ margin:'0 0 28px', fontSize:14, color:'var(--bi-muted)' }}>
+              Successfully imported <strong style={{ color:'var(--bi-fg)' }}>{importResult.imported}</strong> questions.
+              {importResult.errors > 0 && ` ${importResult.errors} questions failed.`}
+            </p>
+            <div style={{ display:'flex', justifyContent:'center', gap:10 }}>
+              <button className="bi-btn-ghost" onClick={() => { setStep('paste'); setRawText(''); setSelectedExam(''); setImportResult(null); setStagedImages({}); setExamInfo(null) }}>
+                Import More
+              </button>
+              <Link href="/admin/exams" className="bi-btn-primary">View Exams</Link>
             </div>
           </div>
+        )}
 
-          {/* Errors */}
-          {allErrors.length > 0 && (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <XCircle className="h-5 w-5 text-red-600" />
-                <h2 className="font-semibold text-red-800">Errors — Must fix before importing</h2>
-              </div>
-              <ul className="space-y-1">
-                {allErrors.map((err, i) => (
-                  <li key={i} className="text-sm text-red-700">{err}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Warnings */}
-          {parseWarnings.length > 0 && (
-            <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <AlertTriangle className="h-5 w-5 text-yellow-600" />
-                <h2 className="font-semibold text-yellow-800">Warnings</h2>
-              </div>
-              <ul className="space-y-1">
-                {parseWarnings.map((w, i) => (
-                  <li key={i} className="text-sm text-yellow-700">{w}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Questions Preview */}
-          {parsedQuestions.length > 0 && (
-            <div className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
-              <div className="border-b border-border/60 bg-muted/30 px-4 py-3 flex items-center justify-between">
-                <h2 className="font-semibold">Questions Preview</h2>
-                <p className="text-xs text-muted-foreground">
-                  Expand a question to add images before importing
-                </p>
-              </div>
-              <ul className="divide-y divide-border/60">
-                {parsedQuestions.map((q, qIndex) => (
-                  <li key={q.questionNumber}>
-                    <div
-                      className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-muted/20"
-                      onClick={() => toggleQuestion(q.questionNumber)}
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-                          {q.questionNumber}
-                        </span>
-                        <span className="text-sm font-medium line-clamp-1">{q.questionText}</span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        {(stagedImages[qIndex]?.length || 0) > 0 && (
-                          <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
-                            {stagedImages[qIndex].length} image{stagedImages[qIndex].length > 1 ? 's' : ''}
-                          </span>
-                        )}
-                        {q.chapter && (
-                          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
-                            {q.chapter}
-                          </span>
-                        )}
-                        {expandedQuestions.has(q.questionNumber)
-                          ? <ChevronUp className="h-4 w-4 text-muted-foreground" />
-                          : <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                        }
-                      </div>
-                    </div>
-
-                    {expandedQuestions.has(q.questionNumber) && (
-                      <div className="border-t border-border/40 bg-muted/10 px-6 py-4 space-y-4">
-
-                        <div className="space-y-1">
-                          {(['a', 'b', 'c', 'd', 'e'] as const).map(letter => {
-                            const choice = q.choices[letter]
-                            if (!choice) return null
-                            const isCorrect = q.correctAnswer === letter
-                            return (
-                              <div key={letter} className={`flex items-start gap-2 rounded-lg px-3 py-2 text-sm ${isCorrect ? 'bg-green-50 text-green-800 font-medium' : 'bg-white dark:bg-card'}`}>
-                                <span className="font-bold uppercase">{letter}.</span>
-                                <span>{choice}</span>
-                                {isCorrect && <span className="ml-auto text-green-600 text-xs">✓ Correct</span>}
-                              </div>
-                            )
-                          })}
-                        </div>
-
-                        <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-                          {q.chapter && <span>Chapter: <strong>{q.chapter}</strong></span>}
-                          {q.lecture && <span>Lecture: <strong>{q.lecture}</strong></span>}
-                          {q.doctorName && <span>Doctor: <strong>{q.doctorName}</strong></span>}
-                        </div>
-
-                        {q.explanation && (
-                          <p className="text-sm text-muted-foreground bg-white dark:bg-card rounded-lg px-3 py-2">
-                            <span className="font-medium">Explanation: </span>{q.explanation}
-                          </p>
-                        )}
-
-                        {/* Image Upload */}
-                        <div className="border-t border-border/40 pt-4">
-                          <p className="text-xs font-medium text-muted-foreground uppercase mb-3">
-                            Images (optional)
-                          </p>
-                          {(stagedImages[qIndex]?.length || 0) > 0 && (
-                            <div className="flex flex-wrap gap-3 mb-3">
-                              {stagedImages[qIndex].map((img, imgIndex) => (
-                                <div key={imgIndex} className="relative group">
-                                  <img src={img.previewUrl} alt="preview" className="h-20 w-20 rounded-lg object-cover border border-border/60" />
-                                  <button
-                                    onClick={() => removeStagedImage(qIndex, imgIndex)}
-                                    className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600"
-                                  >
-                                    <X className="h-3 w-3" />
-                                  </button>
-                                  <input
-                                    type="text"
-                                    placeholder="Caption..."
-                                    value={img.caption}
-                                    onChange={e => updateStagedCaption(qIndex, imgIndex, e.target.value)}
-                                    className="mt-1 w-20 rounded border border-border/60 bg-background px-1 py-0.5 text-xs focus:outline-none"
-                                  />
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          <label className="flex items-center gap-2 w-fit cursor-pointer rounded-lg border border-border/60 px-3 py-2 text-xs font-medium hover:bg-muted transition-colors">
-                            <ImagePlus className="h-4 w-4 text-muted-foreground" />
-                            Add Image
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={e => {
-                                const file = e.target.files?.[0]
-                                if (file) addStagedImage(qIndex, file)
-                                e.target.value = ''
-                              }}
-                            />
-                          </label>
-                        </div>
-                      </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          <div className="flex gap-3">
-            <button
-              onClick={() => setStep('paste')}
-              className="rounded-lg border border-border/60 px-5 py-2 text-sm font-medium hover:bg-muted"
-            >
-              ← Back
-            </button>
-            <button
-              onClick={handleImport}
-              disabled={isImporting || allErrors.length > 0 || parsedQuestions.length === 0}
-              className="flex items-center gap-2 rounded-lg bg-black px-6 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
-            >
-              {isImporting ? 'Importing...' : `Import ${parsedQuestions.length} Questions`}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* STEP 3: DONE */}
-      {step === 'done' && importResult && (
-        <div className="rounded-xl border border-green-200 bg-green-50 p-8 text-center">
-          <CheckCircle className="mx-auto mb-4 h-16 w-16 text-green-500" />
-          <h2 className="mb-2 text-2xl font-bold text-green-800">Import Complete!</h2>
-          <p className="text-green-700 mb-6">
-            Successfully imported <strong>{importResult.imported}</strong> questions.
-            {importResult.errors > 0 && ` ${importResult.errors} questions failed.`}
-          </p>
-          <div className="flex justify-center gap-3">
-            <button
-              onClick={() => { setStep('paste'); setRawText(''); setSelectedExam(''); setImportResult(null); setStagedImages({}); setExamInfo(null) }}
-              className="rounded-lg border border-gray-300 px-5 py-2 text-sm font-medium hover:bg-white"
-            >
-              Import More
-            </button>
-            <Link href="/admin/exams" className="rounded-lg bg-black px-5 py-2 text-sm font-medium text-white hover:bg-gray-800">
-              View Exams
-            </Link>
-          </div>
-        </div>
-      )}
-    </div>
+      </div>
+    </>
   )
 }
-

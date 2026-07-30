@@ -443,7 +443,7 @@ export default async function AdminDashboardPage() {
                   </svg>
                   Add a question
                 </Link>
-                <Link href="/admin/exams" className="adm-btn-ghost-new">
+                <Link href="/admin/content?tab=exams&openModal=true" className="adm-btn-ghost-new">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--clr-primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <line x1="12" y1="5" x2="12" y2="19" />
                     <line x1="5" y1="12" x2="19" y2="12" />

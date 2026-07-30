@@ -2,7 +2,6 @@
 import { redirect } from 'next/navigation'
 import AddAdminForm from '@/components/admin/AddAdminForm'
 import DeleteAdminButton from '@/components/admin/DeleteAdminButton'
-import { Users, Crown, Shield } from 'lucide-react'
 
 async function getAdministrators() {
   const supabase = await createServerSupabaseClient()
@@ -29,116 +28,152 @@ export default async function AdministratorsPage() {
   if (user) {
     const { data: admin } = await supabase
       .from('admins').select('role').eq('user_id', user.id).single()
-    if (admin?.role !== 'super_admin') {
-      redirect('/admin')
-    }
+    if (admin?.role !== 'super_admin') redirect('/admin')
   }
 
   const [admins, batches] = await Promise.all([getAdministrators(), getBatches()])
 
+  const css = `
+    .admp-root {
+      --ap-elev:    oklch(100% 0 0);
+      --ap-soft:    oklch(96% 0.009 55);
+      --ap-fg:      oklch(22% 0.02 50);
+      --ap-muted:   oklch(46% 0.02 50);
+      --ap-bd:      oklch(89% 0.012 50);
+      --ap-primary: oklch(50% 0.19 25);
+      --ap-psoft:   oklch(94% 0.035 25);
+    }
+    .dark .admp-root {
+      --ap-elev:    oklch(22% 0.012 50);
+      --ap-soft:    oklch(20% 0.01 50);
+      --ap-fg:      oklch(92% 0.008 50);
+      --ap-muted:   oklch(62% 0.015 50);
+      --ap-bd:      oklch(32% 0.015 50);
+      --ap-primary: oklch(68% 0.18 25);
+      --ap-psoft:   oklch(28% 0.06 25);
+    }
+    @keyframes ap-fade { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes ap-row  { from{opacity:0;transform:translateY(6px)}  to{opacity:1;transform:translateY(0)} }
+    .ap-fade { animation: ap-fade 0.35s ease-out; }
+    .ap-card { background:var(--ap-elev); border:1px solid var(--ap-bd); border-radius:18px; overflow:hidden; }
+    .ap-avatar { width:40px; height:40px; border-radius:50%; flex-shrink:0; background:var(--ap-psoft); color:var(--ap-primary); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:14px; }
+    .ap-role-badge { font-size:11.5px; font-weight:700; padding:4px 12px; border-radius:20px; background:var(--ap-soft); border:1px solid var(--ap-bd); white-space:nowrap; }
+    .ap-del-btn { width:32px; height:32px; border-radius:9px; border:1px solid var(--ap-bd); background:transparent; color:#f97316; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background 0.15s,border-color 0.15s; }
+    .ap-del-btn:hover { background:rgba(249,115,22,0.08); border-color:#f97316; }
+    .ap-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:64px 20px; text-align:center; color:var(--ap-muted); gap:10px; }
+  `
+
   return (
-    <div className="space-y-6">
+    <>
+      <style>{css}</style>
+      <div
+        className="admp-root ap-fade"
+        style={{
+          fontFamily: "'Plus Jakarta Sans',system-ui,sans-serif",
+          color: 'var(--ap-fg)',
+          maxWidth: 1280,
+          margin: '0 auto',
+          padding: '28px 32px 64px',
+          width: '100%',
+        }}
+      >
 
-      <div>
-        <h1 className="text-2xl font-bold">Administrators</h1>
-        <p className="text-muted-foreground">Manage admin accounts and roles</p>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border border-border/60 bg-card p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Total Admins</p>
-              <p className="mt-1 text-3xl font-bold">{admins.length}</p>
-            </div>
-            <div className="rounded-lg bg-primary/10 p-3">
-              <Users className="h-5 w-5 text-primary" />
-            </div>
-          </div>
-        </div>
-        <div className="rounded-xl border border-border/60 bg-card p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Super Admins</p>
-              <p className="mt-1 text-3xl font-bold">
-                {admins.filter((a: any) => a.role === 'super_admin').length}
-              </p>
-            </div>
-            <div className="rounded-lg bg-yellow-50 p-3">
-              <Crown className="h-5 w-5 text-yellow-600" />
-            </div>
-          </div>
-        </div>
-        <div className="rounded-xl border border-border/60 bg-card p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Regular Admins</p>
-              <p className="mt-1 text-3xl font-bold">
-                {admins.filter((a: any) => a.role === 'admin').length}
-              </p>
-            </div>
-            <div className="rounded-lg bg-blue-50 p-3">
-              <Shield className="h-5 w-5 text-blue-600" />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <AddAdminForm batches={batches} />
-
-      <div className="rounded-xl border border-border/60 bg-card shadow-sm">
-        <div className="flex items-center gap-2 border-b border-border/60 px-6 py-4">
-          <Users className="h-5 w-5 text-primary" />
-          <h2 className="font-semibold">Admin Accounts</h2>
+        {/* Header */}
+        <div style={{ marginBottom: 22 }}>
+          <h1 style={{ margin: '0 0 4px', fontSize: 26, fontWeight: 800 }}>Administrators</h1>
+          <p style={{ margin: 0, fontSize: 14, color: 'var(--ap-muted)' }}>
+            Manage who can access and edit this admin panel.
+          </p>
         </div>
 
-        {admins.length > 0 ? (
-          <div className="divide-y divide-border/60">
-            {admins.map((admin: any) => (
-              <div key={admin.id} className="flex items-center justify-between px-6 py-4 flex-wrap gap-3">
-                <div className="flex items-center gap-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
-                    {(admin.display_name || admin.email || 'A')[0].toUpperCase()}
-                  </div>
-                  <div>
-                    <p className="font-medium">{admin.display_name || 'Unknown'}</p>
-                    <p className="text-sm text-muted-foreground">{admin.email}</p>
-                    {admin.phone && <p className="text-xs text-muted-foreground">{admin.phone}</p>}
-                    {admin.batch && <p className="text-xs text-muted-foreground">Batch: {admin.batch}</p>}
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
-                    admin.role === 'super_admin'
-                      ? 'bg-yellow-100 text-yellow-700'
-                      : admin.role === 'leader'
-                      ? 'bg-purple-100 text-purple-700'
-                      : 'bg-blue-100 text-blue-700'
-                  }`}>
-                    {admin.role === 'super_admin' ? <><Crown className="h-3 w-3" /> Super Admin</>
-                      : admin.role === 'leader' ? <><Shield className="h-3 w-3" /> Leader</>
-                      : <><Shield className="h-3 w-3" /> Admin</>
-                    }
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(admin.created_at).toLocaleDateString()}
-                  </span>
-                  {admin.role !== 'super_admin' && (
-                    <DeleteAdminButton adminId={admin.id} />
-                  )}
-                </div>
-              </div>
-            ))}
+        {/* Add New Admin — collapsible (all logic inside AddAdminForm) */}
+        <AddAdminForm batches={batches} />
+
+        {/* Admin Accounts heading */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 800, marginBottom: 12 }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--ap-primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+          Admin Accounts
+        </div>
+
+        {/* Admin list */}
+        {admins.length === 0 ? (
+          <div className="ap-card">
+            <div className="ap-empty">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.4 }}>
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
+              </svg>
+              <div style={{ fontSize: 15, fontWeight: 700 }}>No administrators found</div>
+              <div style={{ fontSize: 13 }}>Add your first admin using the form above.</div>
+            </div>
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <Users className="mb-4 h-12 w-12 text-muted-foreground/50" />
-            <h3 className="mb-2 text-lg font-semibold">No administrators found</h3>
-            <p className="text-sm text-muted-foreground">Add your first admin using the form above.</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {admins.map((admin: any, idx: number) => {
+              const isSuperAdmin = admin.role === 'super_admin'
+              const isLeader     = admin.role === 'leader'
+              const roleColor    = isSuperAdmin ? '#eab308' : isLeader ? '#a855f7' : 'var(--ap-muted)'
+              const roleLabel    = isSuperAdmin ? 'Super Admin' : isLeader ? 'Leader' : 'Admin'
+              const initial      = (admin.display_name || admin.email || 'A')[0].toUpperCase()
+
+              return (
+                <div
+                  key={admin.id}
+                  className="ap-card"
+                  style={{
+                    padding: '16px 20px',
+                    display: 'flex', alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12, flexWrap: 'wrap',
+                    animation: `ap-row 0.28s ease-out ${idx * 0.04}s both`,
+                  }}
+                >
+                  {/* Left */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
+                    <div className="ap-avatar">{initial}</div>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {admin.display_name || 'Unknown'}
+                        {isSuperAdmin && (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="#eab308" stroke="#eab308" strokeWidth="1">
+                            <path d="M2 20h20l-2-9-5 4-3-8-3 8-5-4z"/>
+                          </svg>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--ap-muted)', marginTop: 1 }}>
+                        {admin.email}
+                        {admin.phone && <span style={{ marginLeft: 8 }}>{admin.phone}</span>}
+                      </div>
+                      {admin.batch && (
+                        <div style={{ fontSize: 12, color: 'var(--ap-muted)', marginTop: 1 }}>
+                          Batch: {admin.batch}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{ fontSize: 11, color: 'var(--ap-muted)' }}>
+                      {new Date(admin.created_at).toLocaleDateString()}
+                    </span>
+                    <span className="ap-role-badge" style={{ color: roleColor }}>
+                      {roleLabel}
+                    </span>
+                    {!isSuperAdmin && <DeleteAdminButton adminId={admin.id} />}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
+
       </div>
-    </div>
+    </>
   )
 }
-

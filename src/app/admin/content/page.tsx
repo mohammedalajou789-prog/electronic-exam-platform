@@ -33,6 +33,100 @@ interface Batch { id: string; name: string; subject_id: string }
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
+function DoctorPicker({ doctors, selectedIds, onChange, disabled, placeholder }: {
+  doctors: { id: string; name: string }[]
+  selectedIds: string[]
+  onChange: (ids: string[]) => void
+  disabled?: boolean
+  placeholder?: string
+}) {
+  const [open, setOpen] = useState(false)
+
+  if (disabled || doctors.length === 0) {
+    return (
+      <div style={{ padding: '10px 13px', borderRadius: 10, border: '1px solid var(--bd)', background: 'var(--bg-soft)', fontSize: 13, color: 'var(--fg-muted)', cursor: 'default' }}>
+        {placeholder || 'No doctors available'}
+      </div>
+    )
+  }
+
+  const selectedNames = doctors.filter(d => selectedIds.includes(d.id)).map(d => d.name)
+
+  return (
+    <div style={{ position: 'relative' }}>
+      {/* Trigger button */}
+      <div
+        onClick={() => setOpen(v => !v)}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '10px 13px', borderRadius: 10,
+          border: `1px solid ${open ? 'var(--clr-primary)' : 'var(--bd)'}`,
+          background: 'var(--bg-soft)', cursor: 'pointer',
+          boxShadow: open ? '0 0 0 3px var(--clr-soft)' : 'none',
+          transition: 'border-color 0.15s, box-shadow 0.15s',
+          userSelect: 'none',
+        }}
+      >
+        <span style={{ fontSize: 13.5, color: selectedNames.length > 0 ? 'var(--fg)' : 'var(--fg-muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {selectedNames.length > 0 ? selectedNames.join(', ') : (placeholder || 'Select doctors...')}
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          {selectedIds.length > 0 && (
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--clr-primary)', background: 'var(--clr-soft)', padding: '1px 8px', borderRadius: 20 }}>
+              {selectedIds.length}
+            </span>
+          )}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--fg-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: open ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.2s' }}>
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </div>
+      </div>
+
+      {/* Dropdown */}
+      {open && (
+        <>
+          {/* Backdrop to close */}
+          <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setOpen(false)} />
+          <div style={{
+            position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, zIndex: 100,
+            background: 'var(--bg-elev)', border: '1px solid var(--bd)', borderRadius: 12,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.12)', overflow: 'hidden',
+            maxHeight: 240, overflowY: 'auto',
+          }}>
+            {doctors.map((d, i) => {
+              const selected = selectedIds.includes(d.id)
+              return (
+                <div
+                  key={d.id}
+                  onClick={() => {
+                    onChange(selected ? selectedIds.filter(id => id !== d.id) : [...selectedIds, d.id])
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '11px 14px', cursor: 'pointer',
+                    background: selected ? 'var(--clr-soft)' : 'transparent',
+                    borderTop: i > 0 ? '1px solid var(--bd)' : 'none',
+                    transition: 'background 0.1s',
+                  }}
+                >
+                  <span style={{ fontSize: 13.5, fontWeight: selected ? 700 : 400, color: selected ? 'var(--clr-primary)' : 'var(--fg)' }}>
+                    {d.name}
+                  </span>
+                  {selected && (
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--clr-primary)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function ContentManagementPage() {
   const supabase = createClient()
 
@@ -69,6 +163,24 @@ export default function ContentManagementPage() {
   const [newBatchName, setNewBatchName] = useState('')
   const [allBatchNames, setAllBatchNames] = useState<string[]>([])
 
+  // New exam form state
+  const [newExamYear, setNewExamYear] = useState('')
+  const [newExamSubjectId, setNewExamSubjectId] = useState('')
+  const [newExamBatchId, setNewExamBatchId] = useState('')
+  const [newExamTitle, setNewExamTitle] = useState('')
+  const [newExamType, setNewExamType] = useState('final')
+  const [newExamCalendarYear, setNewExamCalendarYear] = useState(new Date().getFullYear().toString())
+  const [newExamDoctorIds, setNewExamDoctorIds] = useState<string[]>([])
+  const [newExamStatus, setNewExamStatus] = useState('draft')
+  const [availableBatchesForExam, setAvailableBatchesForExam] = useState<{ id: string; name: string }[]>([])
+  const [availableDoctorsForExam, setAvailableDoctorsForExam] = useState<{ id: string; name: string }[]>([])
+
+  // Exam inline edit state
+  const [editingExamId, setEditingExamId] = useState<string | null>(null)
+  const [examEditDraft, setExamEditDraft] = useState<{ title: string; calendar_year: string; exam_type: string; status: string }>({ title: '', calendar_year: '', exam_type: 'final', status: 'draft' })
+  const [examEditDoctorIds, setExamEditDoctorIds] = useState<string[]>([])
+  const [examEditAvailableDoctors, setExamEditAvailableDoctors] = useState<{ id: string; name: string }[]>([])
+
   // Per-subject inline forms
   const [newDoctorName, setNewDoctorName] = useState<Record<string, string>>({})
   const [newDoctorDept, setNewDoctorDept] = useState<Record<string, string>>({})
@@ -79,7 +191,7 @@ export default function ContentManagementPage() {
   // ── Load ──────────────────────────────────────────────────────────────────
 
   const loadAll = useCallback(async () => {
-    const [yearsRes, semsRes, subsRes, batchesRes, examsRes] = await Promise.all([
+    const [yearsRes, semsRes, subsRes, batchesRes, examsRes, questionsCountRes] = await Promise.all([
       supabase.from('academic_years').select('id, name, is_clinical').order('display_order'),
       supabase.from('semesters').select('*').order('display_order'),
       supabase.from('subjects').select(`
@@ -90,6 +202,7 @@ export default function ContentManagementPage() {
       `).order('name'),
       supabase.from('batches').select('*').order('name'),
       supabase.from('exams').select('*').order('created_at', { ascending: false }),
+      supabase.from('questions').select('id, exam_id').is('deleted_at', null),
     ])
     setAcademicYears(yearsRes.data || [])
     setSemesters(semsRes.data || [])
@@ -99,22 +212,39 @@ export default function ContentManagementPage() {
     const uniqueNames = [...new Set(batchesData.map((b: Batch) => b.name))]
     setAllBatchNames(uniqueNames)
     const rawExams = examsRes.data || []
-    if (rawExams.length > 0) {
-      console.log('RAW EXAM KEYS:', Object.keys(rawExams[0]))
-      console.log('RAW EXAM[0]:', JSON.stringify(rawExams[0], null, 2))
-    } else {
-      console.log('NO EXAMS RETURNED — error:', examsRes.error)
+    const allQuestions = questionsCountRes.data || []
+
+    // بناء map: exam_id → عدد الأسئلة الحقيقي
+    const questionCountMap: Record<string, number> = {}
+    for (const q of allQuestions) {
+      questionCountMap[q.exam_id] = (questionCountMap[q.exam_id] || 0) + 1
     }
-    console.log('SUBJECTS COUNT:', subsData.length, '| BATCHES COUNT:', batchesData.length)
-    const enrichedExams = rawExams.map((exam: any) => ({
-      ...exam,
-      subject: subsData.find((s: Subject) => s.id === exam.subject_id) || null,
-      batch: batchesData.find((b: Batch) => b.id === exam.batch_id) || null,
-    }))
+
+    const enrichedExams = rawExams.map((exam: any) => {
+      // العلاقة الصحيحة: exam → batch → subject
+      const batch = batchesData.find((b: Batch) => b.id === exam.batch_id) || null
+      const subject = batch ? subsData.find((s: Subject) => s.id === batch.subject_id) || null : null
+      return {
+        ...exam,
+        batch,
+        subject,
+        question_count: questionCountMap[exam.id] || 0,
+      }
+    })
     setExams(enrichedExams)
   }, [])
 
   useEffect(() => { loadAll() }, [loadAll])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('tab') === 'exams') {
+      setActiveTab('exams')
+      if (params.get('openModal') === 'true') {
+        setShowExamModal(true)
+      }
+    }
+  }, [])
 
   // ── Toast ─────────────────────────────────────────────────────────────────
 
@@ -231,6 +361,58 @@ export default function ContentManagementPage() {
     if (!confirm('Delete this batch?')) return
     await supabase.from('batches').delete().eq('id', id)
     await loadAll(); showToast('Batch deleted')
+  }
+
+  async function createExam() {
+    if (!newExamSubjectId || !newExamBatchId || !newExamTitle.trim()) return
+    setIsLoading(true)
+    const { data: examData, error } = await supabase.from('exams').insert({
+      batch_id: newExamBatchId,
+      title: newExamTitle.trim(),
+      calendar_year: parseInt(newExamCalendarYear) || new Date().getFullYear(),
+      exam_type: newExamType,
+      status: newExamStatus,
+      timer_mode: 'none',
+      question_count: 0,
+    } as any).select('id').single()
+    if (error) { showToast(error.message, 'error'); setIsLoading(false); return }
+    // Insert exam_doctors for each selected doctor
+    if (examData && newExamDoctorIds.length > 0) {
+      await supabase.from('exam_doctors').insert(
+        newExamDoctorIds.map(did => ({ exam_id: examData.id, doctor_id: did }))
+      )
+    }
+    showToast('Exam created')
+    setNewExamYear(''); setNewExamSubjectId(''); setNewExamBatchId('')
+    setNewExamTitle(''); setNewExamType('final')
+    setNewExamCalendarYear(new Date().getFullYear().toString())
+    setNewExamDoctorIds([]); setNewExamStatus('draft')
+    setAvailableBatchesForExam([]); setAvailableDoctorsForExam([])
+    setShowExamModal(false)
+    await loadAll(); setIsLoading(false)
+  }
+
+  async function saveExamEdit(examId: string) {
+    setIsLoading(true)
+    const { error } = await supabase.from('exams').update({
+      title: examEditDraft.title.trim(),
+      calendar_year: parseInt(examEditDraft.calendar_year) || new Date().getFullYear(),
+      exam_type: examEditDraft.exam_type,
+      status: examEditDraft.status,
+    }).eq('id', examId)
+    if (error) { showToast(error.message, 'error'); setIsLoading(false); return }
+    // Sync exam_doctors: delete all then re-insert selected
+    await supabase.from('exam_doctors').delete().eq('exam_id', examId)
+    if (examEditDoctorIds.length > 0) {
+      await supabase.from('exam_doctors').insert(
+        examEditDoctorIds.map(did => ({ exam_id: examId, doctor_id: did }))
+      )
+    }
+    showToast('Exam updated')
+    setEditingExamId(null)
+    setExamEditDoctorIds([])
+    setExamEditAvailableDoctors([])
+    await loadAll(); setIsLoading(false)
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -695,8 +877,6 @@ export default function ContentManagementPage() {
           flex: '1 1 0%',
           display: 'flex',
           flexDirection: 'column',
-          height: '100%',
-          overflow: 'hidden',
           color: 'var(--fg)',
         }}
       >
@@ -720,9 +900,8 @@ export default function ContentManagementPage() {
           </div>
         )}
 
-        {/* ── STICKY HEADER ──────────────────────────────────────────────────── */}
+        {/* ── HEADER ──────────────────────────────────────────────────── */}
         <div style={{
-          flexShrink: 0,
           background: 'var(--bg-elev)',
           borderBottom: '1px solid var(--bd)',
           padding: '20px 32px 16px',
@@ -820,14 +999,16 @@ export default function ContentManagementPage() {
                   onChange={e => setExamFilterYear(e.target.value)}
                 >
                   <option value="All Years">All Years</option>
-                  {academicYears.map(y => <option key={y.id} value={y.name}>{y.name}</option>)}
+                  {academicYears.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
                 </select>
-                <select className="adm-input" style={{ width: 160 }}>
-                  <option value="All Semesters">All Semesters</option>
-                  <option value="First Semester">First Semester</option>
-                  <option value="Second Semester">Second Semester</option>
-                  <option value="Summer">Summer</option>
-                </select>
+                {!academicYears.find(y => y.id === examFilterYear)?.is_clinical && (
+                  <select className="adm-input" style={{ width: 160 }}>
+                    <option value="All Semesters">All Semesters</option>
+                    <option value="First Semester">First Semester</option>
+                    <option value="Second Semester">Second Semester</option>
+                    <option value="Summer">Summer</option>
+                  </select>
+                )}
                 <div style={{ flex: '1 1 0%' }} />
                 <button
                   onClick={() => setShowExamModal(true)}
@@ -923,32 +1104,39 @@ export default function ContentManagementPage() {
 
           {/* ══ EXAMS TAB ═══════════════════════════════════════════════════ */}
           {activeTab === 'exams' && (() => {
-            // دالة مساعدة: استخرج اسم السنة من الامتحان
-            const getExamYearName = (exam: any): string => {
+            const getExamYearId = (exam: any): string => {
               const subj = exam.subject
               if (!subj) return '—'
-              if (subj.year_id) {
-                return academicYears.find(y => y.id === subj.year_id)?.name || '—'
-              }
+              if (subj.year_id) return subj.year_id
               if (subj.semester_id) {
                 const sem = semesters.find(s => s.id === subj.semester_id)
-                return academicYears.find(y => y.id === sem?.academic_year_id)?.name || '—'
+                return sem?.academic_year_id || '—'
               }
               return '—'
             }
 
+            const getExamYearName = (exam: any): string => {
+              const yid = getExamYearId(exam)
+              return academicYears.find(y => y.id === yid)?.name || '—'
+            }
+
             const filteredExams = examFilterYear === 'All Years'
               ? exams
-              : exams.filter(exam => getExamYearName(exam) === examFilterYear)
+              : exams.filter(exam => getExamYearId(exam) === examFilterYear)
 
-            // جمّع حسب اسم السنة مباشرة بدون الاعتماد على academicYears loop
+            // فرز حسب ترتيب السنوات الحقيقي من academicYears
+            const yearOrder: Record<string, number> = {}
+            academicYears.forEach((y, i) => { yearOrder[y.name] = i })
+
             const yearMap: Record<string, any[]> = {}
             for (const exam of filteredExams) {
               const yn = getExamYearName(exam)
               if (!yearMap[yn]) yearMap[yn] = []
               yearMap[yn].push(exam)
             }
-            const examsByYear = Object.entries(yearMap).map(([yearName, exs]) => ({ yearName, exams: exs }))
+            const examsByYear = Object.entries(yearMap)
+              .map(([yearName, exs]) => ({ yearName, exams: exs }))
+              .sort((a, b) => (yearOrder[a.yearName] ?? 999) - (yearOrder[b.yearName] ?? 999))
 
             return (
               <div className="adm-fade">
@@ -963,35 +1151,183 @@ export default function ContentManagementPage() {
                       <div key={group.yearName}>
                         <div style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--fg-muted)', marginBottom: 10 }}>{group.yearName}</div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                          {group.exams.map(exam => (
-                            <div key={exam.id} className="adm-card adm-row-fade" style={{ padding: '16px 20px' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-                                <div>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                                    <span style={{ fontSize: 14.5, fontWeight: 800 }}>{exam.title}</span>
-                                    <span style={{
-                                      fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
-                                      background: exam.status === 'Published' ? 'var(--clr-soft)' : 'var(--bg-soft)',
-                                      color: exam.status === 'Published' ? 'var(--clr-primary)' : 'var(--fg-muted)',
-                                    }}>{exam.status}</span>
+                          {group.exams.map((exam: any) => {
+                            const isEditing = editingExamId === exam.id
+                            return (
+                              <div key={exam.id} className="adm-card adm-row-fade" style={{ padding: '16px 20px' }}>
+                                {/* Row header */}
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+                                  <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                                      <span style={{ fontSize: 14.5, fontWeight: 800 }}>{exam.title}</span>
+                                      <span style={{
+                                        fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
+                                        background: exam.status === 'published' ? 'var(--clr-soft)' : 'var(--bg-soft)',
+                                        color: exam.status === 'published' ? 'var(--clr-primary)' : 'var(--fg-muted)',
+                                        textTransform: 'capitalize',
+                                      }}>{exam.status}</span>
+                                    </div>
+                                    <div style={{ fontSize: 12.5, color: 'var(--fg-muted)', marginTop: 4 }}>
+                                      {exam.subject?.name} · Batch {exam.batch?.name} · {exam.exam_type} · {exam.calendar_year} · {exam.question_count ?? 0} questions
+                                    </div>
                                   </div>
-                                  <div style={{ fontSize: 12.5, color: 'var(--fg-muted)', marginTop: 4 }}>
-                                    {exam.subject?.name} · Batch {exam.batch?.name} · {exam.exam_type} · {exam.calendar_year} · {exam.questions?.length ?? 0} questions
+                                  <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                                    <button
+                                      className="adm-btn-ghost"
+                                      style={{ padding: '7px 13px', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6 }}
+                                      onClick={() => {
+                                        if (isEditing) {
+                                          setEditingExamId(null)
+                                          setExamEditDoctorIds([])
+                                          setExamEditAvailableDoctors([])
+                                        } else {
+                                          setEditingExamId(exam.id)
+                                          setExamEditDraft({
+                                            title: exam.title || '',
+                                            calendar_year: exam.calendar_year?.toString() || '',
+                                            exam_type: exam.exam_type || 'final',
+                                            status: exam.status || 'draft',
+                                          })
+                                          // Load available doctors from subject
+                                          const sub = exam.subject as Subject | null
+                                          const docs = (sub?.subject_doctors || []).map((sd: SubjectDoctor) => {
+                                            const d = Array.isArray(sd.doctor) ? sd.doctor[0] : sd.doctor
+                                            return { id: sd.doctor_id, name: d?.name || '' }
+                                          })
+                                          setExamEditAvailableDoctors(docs)
+                                          // Load currently linked doctors
+                                          supabase.from('exam_doctors').select('doctor_id').eq('exam_id', exam.id).then(({ data }) => {
+                                            setExamEditDoctorIds((data || []).map((r: any) => r.doctor_id))
+                                          })
+                                        }
+                                      }}
+                                    >
+                                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                                      {isEditing ? 'Cancel' : 'Edit Info'}
+                                    </button>
+                                    <button
+                                      className="adm-btn-ghost"
+                                      style={{ padding: '7px 13px', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6 }}
+                                      onClick={() => window.location.href = `/admin/exams/${(exam as any).serial_number}`}
+                                    >
+                                      Questions
+                                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                                    </button>
                                   </div>
                                 </div>
-                                <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                                  <button className="adm-btn-ghost" style={{ padding: '7px 13px', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-                                    Edit Info
-                                  </button>
-                                  <button className="adm-btn-ghost" style={{ padding: '7px 13px', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                    Questions
-                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-                                  </button>
-                                </div>
+
+                                {/* Inline edit form */}
+                                {isEditing && (
+                                  <>
+                                    <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--bd)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                                      <div style={{ gridColumn: '1 / -1' }}>
+                                        <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>
+                                          Doctors
+                                          {examEditDoctorIds.length > 0 && (
+                                            <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 700, color: 'var(--clr-primary)', background: 'var(--clr-soft)', padding: '1px 8px', borderRadius: 20 }}>
+                                              {examEditDoctorIds.length} selected
+                                            </span>
+                                          )}
+                                        </div>
+                                        {examEditAvailableDoctors.length === 0 ? (
+                                          <div style={{ padding: '10px 13px', borderRadius: 10, border: '1px solid var(--bd)', background: 'var(--bg-soft)', fontSize: 13, color: 'var(--fg-muted)' }}>
+                                            No doctors for this subject
+                                          </div>
+                                        ) : (
+                                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                            {examEditAvailableDoctors.map(d => {
+                                              const selected = examEditDoctorIds.includes(d.id)
+                                              return (
+                                                <button
+                                                  key={d.id}
+                                                  type="button"
+                                                  onClick={() => setExamEditDoctorIds(prev => selected ? prev.filter(id => id !== d.id) : [...prev, d.id])}
+                                                  style={{
+                                                    display: 'flex', alignItems: 'center', gap: 6,
+                                                    padding: '7px 13px', borderRadius: 20, cursor: 'pointer',
+                                                    border: `1.5px solid ${selected ? 'var(--clr-primary)' : 'var(--bd)'}`,
+                                                    background: selected ? 'var(--clr-soft)' : 'var(--bg-soft)',
+                                                    color: selected ? 'var(--clr-primary)' : 'var(--fg-muted)',
+                                                    fontSize: 13, fontWeight: selected ? 700 : 500,
+                                                    fontFamily: 'inherit', transition: 'all 0.15s',
+                                                  }}
+                                                >
+                                                  {selected && (
+                                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                      <polyline points="20 6 9 17 4 12"/>
+                                                    </svg>
+                                                  )}
+                                                  {d.name}
+                                                </button>
+                                              )
+                                            })}
+                                          </div>
+                                        )}
+                                      </div>
+                                      <label style={{ display: 'block' }}>
+                                        <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>Title</div>
+                                        <input
+                                          className="adm-input"
+                                          value={examEditDraft.title}
+                                          onChange={e => setExamEditDraft(p => ({ ...p, title: e.target.value }))}
+                                        />
+                                      </label>
+                                      <label style={{ display: 'block' }}>
+                                        <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>Calendar Year</div>
+                                        <input
+                                          className="adm-input"
+                                          value={examEditDraft.calendar_year}
+                                          onChange={e => setExamEditDraft(p => ({ ...p, calendar_year: e.target.value }))}
+                                        />
+                                      </label>
+                                      <label style={{ display: 'block' }}>
+                                        <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>Exam Type</div>
+                                        <select
+                                          className="adm-input"
+                                          value={examEditDraft.exam_type}
+                                          onChange={e => setExamEditDraft(p => ({ ...p, exam_type: e.target.value }))}
+                                        >
+                                          <option value="final">Final</option>
+                                          <option value="midterm">Midterm</option>
+                                          <option value="quiz">Quiz</option>
+                                          <option value="practical">Practical</option>
+                                          <option value="mock">Mock</option>
+                                        </select>
+                                      </label>
+                                      <label style={{ display: 'block' }}>
+                                        <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>Status</div>
+                                        <select
+                                          className="adm-input"
+                                          value={examEditDraft.status}
+                                          onChange={e => setExamEditDraft(p => ({ ...p, status: e.target.value }))}
+                                        >
+                                          <option value="draft">Draft</option>
+                                          <option value="published">Published</option>
+                                          <option value="archived">Archived</option>
+                                        </select>
+                                      </label>
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
+                                      <button
+                                        className="adm-btn-ghost"
+                                        onClick={() => setEditingExamId(null)}
+                                      >
+                                        Cancel
+                                      </button>
+                                      <button
+                                        className="adm-btn-primary"
+                                        disabled={isLoading || !examEditDraft.title.trim()}
+                                        onClick={() => saveExamEdit(exam.id)}
+                                      >
+                                        {isLoading ? <Loader2 width={15} height={15} className="animate-spin" /> : null}
+                                        Save
+                                      </button>
+                                    </div>
+                                  </>
+                                )}
                               </div>
-                            </div>
-                          ))}
+                            )
+                          })}
                         </div>
                       </div>
                     ))}
@@ -1096,7 +1432,7 @@ export default function ContentManagementPage() {
       {/* ── ADD EXAM MODAL ─────────────────────────────────────────────────── */}
       {showExamModal && (
         <div className="adm-modal-backdrop" onClick={e => { if (e.target === e.currentTarget) setShowExamModal(false) }}>
-          <div className="adm-modal-card adm-content-root adm-scrollbar" style={{ maxWidth: 560, maxHeight: '88vh', overflowY: 'auto' }}>
+          <div className="adm-modal-card adm-content-root adm-scrollbar" style={{ maxWidth: 820, maxHeight: '90vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
               <div style={{ fontSize: 16, fontWeight: 800 }}>New Exam</div>
               <button
@@ -1106,61 +1442,162 @@ export default function ContentManagementPage() {
                 <X width={15} height={15} />
               </button>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 20 }}>
               <label style={{ display: 'block' }}>
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>Academic Year *</div>
-                <select className="adm-input">
+                <select
+                  className="adm-input"
+                  value={newExamYear}
+                  onChange={e => {
+                    setNewExamYear(e.target.value)
+                    setNewExamSubjectId('')
+                    setNewExamBatchId('')
+                    setNewExamDoctorIds([])
+                    setAvailableBatchesForExam([])
+                    setAvailableDoctorsForExam([])
+                  }}
+                >
                   <option value="">Select Year</option>
-                  {academicYears.map(y => <option key={y.id} value={y.name}>{y.name}</option>)}
+                  {academicYears.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
                 </select>
               </label>
               <label style={{ display: 'block' }}>
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>Subject *</div>
-                <select className="adm-input">
+                <select
+                  className="adm-input"
+                  value={newExamSubjectId}
+                  onChange={e => {
+                    const subId = e.target.value
+                    setNewExamSubjectId(subId)
+                    setNewExamBatchId('')
+                    setNewExamDoctorIds([])
+                    const sub = subjects.find(s => s.id === subId)
+                    setAvailableBatchesForExam(sub?.batches || [])
+                    const docs = (sub?.subject_doctors || []).map((sd: SubjectDoctor) => {
+                      const d = Array.isArray(sd.doctor) ? sd.doctor[0] : sd.doctor
+                      return { id: sd.doctor_id, name: d?.name || '' }
+                    })
+                    setAvailableDoctorsForExam(docs)
+                  }}
+                >
                   <option value="">Select Subject</option>
-                  {subjects.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                  {(() => {
+                    if (!newExamYear) return subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)
+                    const yearObj = academicYears.find(y => y.id === newExamYear)
+                    if (!yearObj) return null
+                    if (yearObj.is_clinical) {
+                      return subjects.filter(s => s.year_id === yearObj.id).map(s => <option key={s.id} value={s.id}>{s.name}</option>)
+                    }
+                    const yearSems = semesters.filter(sem => sem.academic_year_id === yearObj.id)
+                    return subjects.filter(s => yearSems.some(sem => sem.id === s.semester_id)).map(s => <option key={s.id} value={s.id}>{s.name}</option>)
+                  })()}
                 </select>
               </label>
               <label style={{ display: 'block' }}>
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>Batch *</div>
-                <select className="adm-input">
+                <select
+                  className="adm-input"
+                  value={newExamBatchId}
+                  onChange={e => setNewExamBatchId(e.target.value)}
+                  disabled={!newExamSubjectId}
+                >
                   <option value="">Select Batch</option>
-                  {allBatchNames.map(b => <option key={b} value={b}>{b}</option>)}
+                  {availableBatchesForExam.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </select>
               </label>
               <label style={{ display: 'block' }}>
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>Exam Title *</div>
-                <input className="adm-input" placeholder="e.g. Final Exam, Quiz 1, Midterm..." />
+                <input
+                  className="adm-input"
+                  placeholder="e.g. Final Exam, Quiz 1, Midterm..."
+                  value={newExamTitle}
+                  onChange={e => setNewExamTitle(e.target.value)}
+                />
               </label>
               <label style={{ display: 'block' }}>
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>Exam Type</div>
-                <select className="adm-input">
-                  <option value="Final">Final</option>
-                  <option value="Midterm">Midterm</option>
-                  <option value="Quiz">Quiz</option>
+                <select className="adm-input" value={newExamType} onChange={e => setNewExamType(e.target.value)}>
+                  <option value="final">Final</option>
+                  <option value="midterm">Midterm</option>
+                  <option value="quiz">Quiz</option>
+                  <option value="practical">Practical</option>
+                  <option value="mock">Mock</option>
                 </select>
               </label>
               <label style={{ display: 'block' }}>
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>Calendar Year</div>
-                <input className="adm-input" defaultValue={new Date().getFullYear().toString()} />
+                <input
+                  className="adm-input"
+                  value={newExamCalendarYear}
+                  onChange={e => setNewExamCalendarYear(e.target.value)}
+                />
               </label>
-              <label style={{ display: 'block' }}>
-                <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>Doctor</div>
-                <select className="adm-input">
-                  <option value="">No doctor</option>
-                </select>
-              </label>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 8 }}>
+                  Doctors
+                  {newExamDoctorIds.length > 0 && (
+                    <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 700, color: 'var(--clr-primary)', background: 'var(--clr-soft)', padding: '2px 9px', borderRadius: 20 }}>
+                      {newExamDoctorIds.length} selected
+                    </span>
+                  )}
+                </div>
+                {!newExamSubjectId ? (
+                  <div style={{ padding: '10px 13px', borderRadius: 10, border: '1px solid var(--bd)', background: 'var(--bg-soft)', fontSize: 13, color: 'var(--fg-muted)' }}>
+                    Select a subject first
+                  </div>
+                ) : availableDoctorsForExam.length === 0 ? (
+                  <div style={{ padding: '10px 13px', borderRadius: 10, border: '1px solid var(--bd)', background: 'var(--bg-soft)', fontSize: 13, color: 'var(--fg-muted)' }}>
+                    No doctors for this subject
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {availableDoctorsForExam.map(d => {
+                      const selected = newExamDoctorIds.includes(d.id)
+                      return (
+                        <button
+                          key={d.id}
+                          type="button"
+                          onClick={() => setNewExamDoctorIds(prev => selected ? prev.filter(id => id !== d.id) : [...prev, d.id])}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 6,
+                            padding: '7px 13px', borderRadius: 20, cursor: 'pointer',
+                            border: `1.5px solid ${selected ? 'var(--clr-primary)' : 'var(--bd)'}`,
+                            background: selected ? 'var(--clr-soft)' : 'var(--bg-soft)',
+                            color: selected ? 'var(--clr-primary)' : 'var(--fg-muted)',
+                            fontSize: 13, fontWeight: selected ? 700 : 500,
+                            fontFamily: 'inherit', transition: 'all 0.15s',
+                          }}
+                        >
+                          {selected && (
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12"/>
+                            </svg>
+                          )}
+                          {d.name}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
               <label style={{ display: 'block' }}>
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>Status</div>
-                <select className="adm-input">
-                  <option value="Draft">Draft</option>
-                  <option value="Published">Published</option>
+                <select className="adm-input" value={newExamStatus} onChange={e => setNewExamStatus(e.target.value)}>
+                  <option value="draft">Draft</option>
+                  <option value="published">Published</option>
                 </select>
               </label>
             </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button onClick={() => setShowExamModal(false)} className="adm-btn-ghost">Cancel</button>
-              <button className="adm-btn-primary">+ Create Exam</button>
+              <button
+                onClick={createExam}
+                disabled={isLoading || !newExamSubjectId || !newExamBatchId || !newExamTitle.trim()}
+                className="adm-btn-primary"
+              >
+                {isLoading ? <Loader2 width={15} height={15} className="animate-spin" /> : null}
+                + Create Exam
+              </button>
             </div>
           </div>
         </div>

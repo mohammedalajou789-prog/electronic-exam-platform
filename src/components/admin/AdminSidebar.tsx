@@ -24,7 +24,7 @@ export default function AdminSidebar({ role, userName, userEmail, userBatch }: P
     {
       label: 'Dashboard',
       href: '/admin',
-      dotColor: '#ffffff',
+      dotColor: 'var(--fg-muted)',
       roles: ['super_admin', 'admin', 'leader'],
     },
     {
@@ -280,7 +280,7 @@ export default function AdminSidebar({ role, userName, userEmail, userBatch }: P
                     textOverflow: 'ellipsis',
                   }}
                 >
-                  {userName || 'Electronic'}
+                  {userName && userName.trim() !== '' ? userName : (userEmail ? userEmail.split('@')[0] : 'Electronic')}
                 </div>
                 <span
                   style={{

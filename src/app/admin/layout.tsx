@@ -26,9 +26,10 @@ export default async function AdminLayout({
 
   // Safely read optional columns — won't crash if they don't exist in DB
   const adminRecord = admin as Record<string, unknown> | null
-  const userName  = (adminRecord?.['name'] as string | undefined)
-                    || user.email?.split('@')[0]
-                    || 'Electronic'
+  const userName  = (adminRecord?.['display_name'] as string | undefined)
+                    || (adminRecord?.['full_name'] as string | undefined)
+                    || (adminRecord?.['name'] as string | undefined)
+                    || undefined
   const userEmail = user.email || undefined
   const userBatch = adminRecord?.['batch'] as string | undefined
 
