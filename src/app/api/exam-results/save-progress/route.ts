@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
         answers_json: answers,
         completed: false,
         updated_at: new Date().toISOString(),
-      })
+      }, { onConflict: 'user_id,exam_id' })
 
     return NextResponse.json({ success: true })
   } catch (error) {

@@ -5,41 +5,22 @@ export type MnToken =
   | { type: 'list'; items: MnInlineToken[][] }
   | { type: 'callout'; children: MnInlineToken[] }
   | { type: 'image_slot'; slotNumber: 1 | 2 | 3 }
-  | { type: 'table'; headers: string[]; rows: string[][] };
+  | { type: 'table'; headers: MnInlineToken[][]; rows: MnInlineToken[][][] };
 
 export type MnInlineToken =
   | { type: 'text'; value: string }
   | { type: 'bold'; value: string }
   | { type: 'italic'; value: string }
   | { type: 'highlight'; value: string }
+  | { type: 'highlight_bold'; value: string }
   | { type: 'green'; value: string }
   | { type: 'blue'; value: string }
   | { type: 'underline'; value: string };
 
-function parseTable(raw: string): { headers: string[]; rows: string[][] } {
-  const lines = raw
-    .trim()
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.startsWith('|') && l.endsWith('|'))
-    .filter((l) => !/^\|[\s|:-]+\|$/.test(l));
-
-  const parseRow = (line: string): string[] => {
-    return line
-      .slice(1, -1)
-      .split('|')
-      .map((cell) => cell.trim());
-  };
-
-  const headers = lines[0] ? parseRow(lines[0]) : [];
-  const rows = lines.slice(1).map(parseRow);
-  return { headers, rows };
-}
-
-function parseInline(text: string): MnInlineToken[] {
+export function parseInline(text: string): MnInlineToken[] {
   const tokens: MnInlineToken[] = [];
   const pattern =
-    /(\*\*([\s\S]+?)\*\*)|(\*([\s\S]+?)\*)|(__([\s\S]+?)__)|==([\s\S]+?)==|!!([\s\S]+?)!!|~~([\s\S]+?)~~|::([\s\S]+?)::/g;
+    /==([\s\S]+?)==|(\*\*([\s\S]+?)\*\*)|(\*([\s\S]+?)\*)|(__([\s\S]+?)__)|!!([\s\S]+?)!!|~~([\s\S]+?)~~|::([\s\S]+?)::/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
@@ -47,19 +28,28 @@ function parseInline(text: string): MnInlineToken[] {
     if (match.index > lastIndex) {
       tokens.push({ type: 'text', value: text.slice(lastIndex, match.index) });
     }
-    if (match[1]) {
-      tokens.push({ type: 'bold', value: match[2] as string });
-    } else if (match[3]) {
-      tokens.push({ type: 'italic', value: match[4] as string });
-    } else if (match[5]) {
-      tokens.push({ type: 'underline', value: match[6] as string });
-    } else if (match[7]) {
-      tokens.push({ type: 'highlight', value: match[7] });
-    } else if (match[8]) {
+
+    if (match[1] !== undefined) {
+      // ==...== — check if content is wrapped in **...**
+      const inner = match[1];
+      const boldInside = /^\*\*([\s\S]+)\*\*$/.exec(inner);
+      if (boldInside) {
+        tokens.push({ type: 'highlight_bold', value: boldInside[1] });
+      } else {
+        tokens.push({ type: 'highlight', value: inner });
+      }
+    } else if (match[2] !== undefined) {
+      tokens.push({ type: 'bold', value: match[3] as string });
+    } else if (match[4] !== undefined) {
+      tokens.push({ type: 'italic', value: match[5] as string });
+    } else if (match[6] !== undefined) {
+      tokens.push({ type: 'underline', value: match[7] as string });
+    } else if (match[8] !== undefined) {
       tokens.push({ type: 'green', value: match[8] });
-    } else if (match[9]) {
+    } else if (match[9] !== undefined) {
       tokens.push({ type: 'blue', value: match[9] });
     }
+
     lastIndex = match.index + match[0].length;
   }
 
@@ -68,7 +58,25 @@ function parseInline(text: string): MnInlineToken[] {
   }
   return tokens;
 }
+function parseTable(raw: string): { headers: MnInlineToken[][]; rows: MnInlineToken[][][] } {
+  const lines = raw
+    .trim()
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith('|') && l.endsWith('|'))
+    .filter((l) => !/^\|[\s|:-]+\|$/.test(l));
 
+  const parseRow = (line: string): MnInlineToken[][] => {
+    return line
+      .slice(1, -1)
+      .split('|')
+      .map((cell) => parseInline(cell.trim()));
+  };
+
+  const headers = lines[0] ? parseRow(lines[0]) : [];
+  const rows = lines.slice(1).map(parseRow);
+  return { headers, rows };
+}
 function pushParagraphs(text: string, tokens: MnToken[]): void {
   const paragraphs = text
     .split(/\n\s*\n/)

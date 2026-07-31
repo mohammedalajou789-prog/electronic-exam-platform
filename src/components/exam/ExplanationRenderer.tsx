@@ -6,7 +6,7 @@
 'use client';
 
 import Image from 'next/image';
-import { parseMnSyntax, type MnToken, type MnInlineToken } from '@/lib/mn-syntax/parser';
+import { parseMnSyntax, parseInline, type MnToken, type MnInlineToken } from '@/lib/mn-syntax/parser';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -17,6 +17,7 @@ interface ExplanationRendererProps {
 }
 
 // ─── Inline Token Renderer ───────────────────────────────────────────────────
+// Renders inline MN tokens within rich contexts like bold
 
 function InlineToken({ token }: { token: MnInlineToken }) {
   switch (token.type) {
@@ -24,7 +25,11 @@ function InlineToken({ token }: { token: MnInlineToken }) {
       return <span>{token.value}</span>;
 
     case 'bold':
-      return <strong className="font-semibold">{token.value}</strong>;
+      return (
+        <strong style={{ fontWeight: 700 }}>
+          <InlineContent children={parseInline(token.value)} />
+        </strong>
+      );
 
     case 'italic':
       return <em>{token.value}</em>;
@@ -38,6 +43,21 @@ function InlineToken({ token }: { token: MnInlineToken }) {
             padding: '1px 5px',
             borderRadius: '4px',
             fontWeight: 600,
+          }}
+        >
+          {token.value}
+        </span>
+      );
+
+    case 'highlight_bold':
+      return (
+        <span
+          style={{
+            background: 'oklch(88% 0.11 95)',
+            color: 'oklch(30% 0.06 95)',
+            padding: '1px 5px',
+            borderRadius: '4px',
+            fontWeight: 800,
           }}
         >
           {token.value}
@@ -238,7 +258,7 @@ case 'list':
                     borderBottom: `1px solid ${borderColor}`,
                   }}
                 >
-                  {token.headers.map((header, i) => (
+                  {token.headers.map((headerTokens, i) => (
                     <th
                       key={i}
                       style={{
@@ -250,7 +270,7 @@ case 'list':
                         textTransform: 'uppercase',
                       }}
                     >
-                      {header}
+                      <InlineContent children={headerTokens} />
                     </th>
                   ))}
                 </tr>
@@ -271,7 +291,7 @@ case 'list':
                         : 'rgba(255,255,255,0.2)',
                   }}
                 >
-                  {row.map((cell, cellIndex) => (
+                  {row.map((cellTokens, cellIndex) => (
                     <td
                       key={cellIndex}
                       style={{
@@ -280,7 +300,7 @@ case 'list':
                         verticalAlign: 'top',
                       }}
                     >
-                      {cell}
+                      <InlineContent children={cellTokens} />
                     </td>
                   ))}
                 </tr>

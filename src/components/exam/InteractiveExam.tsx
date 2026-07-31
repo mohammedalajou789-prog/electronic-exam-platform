@@ -143,6 +143,9 @@ export default function InteractiveExam({ exam, questions, savedProgress }: Prop
 
   const [isDark, setIsDark] = useState(false)
   const [mode, setMode] = useState<Mode>('play')
+  
+  // DEBUG - remove after fixing
+  console.log('DEBUG:', { mode, questionsLength: questions.length, currentQ: questions[0]?.id, savedProgress })
   const [current, setCurrent] = useState(savedProgress?.current_question ?? 0)
   const [answers, setAnswers] = useState<Record<string, string>>(savedProgress?.answers_json ?? {})
   const [flagged, setFlagged] = useState<Record<string, boolean>>({})
@@ -174,13 +177,15 @@ export default function InteractiveExam({ exam, questions, savedProgress }: Prop
 
   // Timer
   useEffect(() => {
-    if (exam.timer_mode === 'none' || exam.duration_minutes === null || mode !== 'play') return
+    if (exam.timer_mode === 'none' || !exam.duration_minutes || exam.duration_minutes <= 0 || mode !== 'play') return
     if (timerRef.current) clearInterval(timerRef.current)
     timerRef.current = setInterval(() => {
       setSecondsLeft(s => {
         if (s <= 1) {
           clearInterval(timerRef.current!)
-          if (exam.timer_mode === 'strict') finishExam()
+          if (exam.timer_mode === 'strict' && (exam.duration_minutes ?? 0) > 0) {
+            setTimeout(() => finishExam(), 0)
+          }
           return 0
         }
         return s - 1
