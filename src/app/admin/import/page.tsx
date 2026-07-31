@@ -61,7 +61,13 @@ const [copiedPrompt, setCopiedPrompt] = useState(false)
 const [formatExpanded, setFormatExpanded] = useState(false)
 const [examInfoExpanded, setExamInfoExpanded] = useState(false)
   const [examSearch, setExamSearch] = useState('')
-  const [expandedSubject, setExpandedSubject] = useState<string | null>(null)
+const [expandedSubject, setExpandedSubject] = useState<string | null>(null)
+
+// Doctor assignment modal state
+const [showDoctorModal, setShowDoctorModal] = useState(false)
+const [doctorAssignments, setDoctorAssignments] = useState<Record<string, number[]>>({})
+const [doctorModalStep, setDoctorModalStep] = useState(0)
+const [pendingLectureNums, setPendingLectureNums] = useState<{ name: string; num: number; chapterName: string }[]>([])
 
   const [examInfo, setExamInfo] = useState<{
     subjectId: string
@@ -102,7 +108,7 @@ const [examInfoExpanded, setExamInfoExpanded] = useState(false)
     return batch?.subject_id || null
   }
 
-  function handleExamSelect(examId: string, subjectName?: string) {
+  async function handleExamSelect(examId: string, subjectName?: string) {
     setSelectedExam(examId)
     if (!examId) { setExamInfo(null); return }
     const subjectId = getSubjectIdForExam(examId)
@@ -116,7 +122,12 @@ const [examInfoExpanded, setExamInfoExpanded] = useState(false)
         name: l.name,
         chapterName: allChapters.find(c => c.id === l.chapter_id)?.name || ''
       }))
-    setExamInfo({ subjectId, chapters: subjectChapters, lectures: subjectLectures, lecturesWithChapter, doctors: doctors.map(d => d.name) })
+    const { data: subjectDoctorsData } = await supabase
+      .from('subject_doctors')
+      .select('doctor:doctors(id, name)')
+      .eq('subject_id', subjectId)
+    const subjectDoctorNames = (subjectDoctorsData || []).map((sd: any) => Array.isArray(sd.doctor) ? sd.doctor[0]?.name : sd.doctor?.name).filter(Boolean)
+    setExamInfo({ subjectId, chapters: subjectChapters, lectures: subjectLectures, lecturesWithChapter, doctors: subjectDoctorNames })
     if (subjectName) setExpandedSubject(subjectName)
   }
 
@@ -124,7 +135,7 @@ const [examInfoExpanded, setExamInfoExpanded] = useState(false)
     const errors: string[] = []
     const subjectId = getSubjectIdForExam(selectedExam)
     const validChapterNames = allChapters.filter(c => c.subject_id === subjectId).map(c => c.name.toLowerCase().trim())
-    const validDoctorNames = doctors.map(d => d.name.toLowerCase().trim())
+    const validDoctorNames = (examInfo?.doctors || []).map(n => n.toLowerCase().trim())
     for (const q of questions) {
       if (q.doctorName) {
         if (!validDoctorNames.includes(q.doctorName.toLowerCase().trim()))
@@ -293,21 +304,22 @@ __text__        Underline
 
   const allErrors = [...parseErrors.map(e => `Question ${e.questionNumber}: ${e.message}`), ...validationErrors]
 
-  function copyAsPrompt() {
+  function buildAndCopyPrompt(assignments: Record<string, number[]>) {
     if (!examInfo) return
+
     const isMultipleDoctors = examInfo.doctors.length > 1
 
-    // Group lectures by chapter with numbering
+    // Build numbered lectures list
     const lecturesByChapter: Record<string, { name: string; num: number }[]> = {}
     let lectureCounter = 1
-    const numberedLectures: { name: string; chapterName: string; num: number }[] = []
+    const allNumberedLectures: { name: string; chapterName: string; num: number }[] = []
 
     examInfo.chapters.forEach(chapterName => {
       const chapterLectures = examInfo.lecturesWithChapter
         .filter(l => l.chapterName === chapterName)
         .map(l => {
           const entry = { name: l.name, chapterName, num: lectureCounter++ }
-          numberedLectures.push(entry)
+          allNumberedLectures.push(entry)
           return { name: l.name, num: entry.num }
         })
       if (chapterLectures.length > 0) {
@@ -319,18 +331,42 @@ __text__        Underline
       `  ${chapter}:\n${lectures.map(l => `    ${l.num}. ${l.name}`).join('\n')}`
     ).join('\n\n') || '  (No lectures defined)'
 
-    const doctorInstruction = isMultipleDoctors
-      ? `Each doctor teaches specific lectures. Assign each question to the correct doctor based on the lecture number.
-Doctors and their lectures:
-${examInfo.doctors.map(d => `  - ${d} ( )`).join('\n')}
+    // Build doctor instruction
+    let doctorInstruction = ''
+    let doctorRule = ''
 
-The lecture numbers in the parentheses above are left blank — fill them in manually before using this prompt.`
-      : `All questions are taught by: ${examInfo.doctors[0] || 'N/A'}
-Add this line to every question: Doctor: ${examInfo.doctors[0] || 'N/A'}`
+    if (!isMultipleDoctors) {
+      const singleDoc = examInfo.doctors[0] || 'N/A'
+      doctorInstruction = `All questions are taught by: ${singleDoc}
+Add this line to every question: Doctor: ${singleDoc}`
+      doctorRule = `8. Every question must include: Doctor: ${singleDoc}`
+    } else {
+      // Build assignment map: doctorName → lecture nums
+      const assignmentLines = examInfo.doctors.map(docName => {
+        const nums = assignments[docName] || []
+        if (nums.length === 0) return `  - ${docName}: (no lectures assigned)`
+        const lectureNames = nums.map(n => {
+          const found = allNumberedLectures.find(l => l.num === n)
+          return found ? `${n}. ${found.name}` : `${n}`
+        })
+        return `  - ${docName}:\n${lectureNames.map(ln => `      ${ln}`).join('\n')}`
+      }).join('\n\n')
 
-    const doctorRule = isMultipleDoctors
-      ? `8. Assign the "Doctor:" field based on the lecture number and the doctor list above`
-      : `8. Every question must include: Doctor: ${examInfo.doctors[0] || 'N/A'}`
+      // Find unassigned lectures
+      const allAssigned = Object.values(assignments).flat()
+      const unassigned = allNumberedLectures.filter(l => !allAssigned.includes(l.num))
+      const unassignedNote = unassigned.length > 0
+        ? `\nLectures with no assigned doctor (lectures ${unassigned.map(l => l.num).join(', ')}): write these questions WITHOUT a Doctor field.`
+        : ''
+
+      doctorInstruction = `Each doctor teaches specific lectures. Assign the Doctor field based on the lecture number.
+
+Doctor assignments:
+${assignmentLines}
+${unassignedNote}`
+
+      doctorRule = `8. Assign the "Doctor:" field based on the lecture number and the assignments above. If a lecture has no assigned doctor, omit the Doctor line entirely for that question.`
+    }
 
     const prompt = `You are a medical education assistant helping format exam questions for the Electronic Exam Platform.
 
@@ -388,7 +424,7 @@ Enrich every explanation using these formatting tokens:
   | Value 1  | Value 2  |
   [/TABLE]       → Table — use for comparisons, criteria, or classifications
 
-Every explanation must use at least **bold** and ==highlight==. Add !!callout!! for high-yield facts.
+IMPORTANT — Explanation quality: Every explanation must be thorough and detailed, not just one or two lines. Cover the mechanism, why the correct answer is right, relevant clinical context, and key facts a student needs to remember. Use at least **bold** and ==highlight== in every explanation. Add !!callout!! for high-yield clinical pearls.
 
 ════════════════════════════════════════
 RULES:
@@ -396,12 +432,31 @@ RULES:
 
 1. Mark the correct answer with * after a space at the end of that choice line
 2. Use EXACT chapter and lecture names — spelling must match the list above perfectly
-3. Every question requires: question text, choices A–D, correct answer marked with *, chapter, lecture, doctor, explanation
-4. Choice E is optional
-5. Wrong answer explanations are optional but strongly recommended
-6. Output nothing except the formatted questions — no commentary, no markdown, no extra text
-7. Number questions sequentially starting from 1
+3. Every question requires: question text, choices A–D, correct answer marked with *, chapter, lecture, explanation
+4. The Doctor field is required only when a doctor is assigned to that lecture (see DOCTORS section above)
+5. Choice E is optional
+6. Wrong answer explanations are optional but strongly recommended
+7. Output the formatted questions first, then append the END OF REPORT section below
+8. Number questions sequentially starting from 1
 ${doctorRule}
+9. If a question does not clearly belong to any chapter or lecture in the list above, assign the most appropriate chapter and lecture name, even if it requires creating a new one. At the end of the report, list all newly added chapters/lectures under "NEW TOPICS ADDED".
+10. If you notice any errors or inconsistencies in the original questions (wrong answer, contradictory choices, unclear phrasing, etc.), list them under "QUESTION NOTES" in the end report.
+11. If any question appears to require a clinical image, X-ray, ECG, histology slide, or any visual to be answered correctly, list those question numbers under "QUESTIONS REQUIRING IMAGES" in the end report.
+
+════════════════════════════════════════
+END OF REPORT FORMAT (append after all questions):
+════════════════════════════════════════
+
+═══ END REPORT ═══
+
+NEW TOPICS ADDED:
+(list any new chapter or lecture names you created, or write "None")
+
+QUESTION NOTES:
+(list any errors or issues found in the original questions, or write "None")
+
+QUESTIONS REQUIRING IMAGES:
+(list question numbers that need a visual/image, or write "None")
 
 ════════════════════════════════════════
 QUESTIONS TO CONVERT:
@@ -412,6 +467,27 @@ QUESTIONS TO CONVERT:
     navigator.clipboard.writeText(prompt)
     setCopiedPrompt(true)
     setTimeout(() => setCopiedPrompt(false), 2000)
+    setShowDoctorModal(false)
+  }
+
+  function handleCraftPromptClick() {
+    if (!examInfo) return
+    if (examInfo.doctors.length <= 1) {
+      buildAndCopyPrompt({})
+      return
+    }
+    // Build numbered lectures for modal
+    let counter = 1
+    const numbered: { name: string; num: number; chapterName: string }[] = []
+    examInfo.chapters.forEach(chapterName => {
+      examInfo.lecturesWithChapter
+        .filter(l => l.chapterName === chapterName)
+        .forEach(l => { numbered.push({ name: l.name, num: counter++, chapterName }) })
+    })
+    setPendingLectureNums(numbered)
+    setDoctorAssignments({})
+    setDoctorModalStep(0)
+    setShowDoctorModal(true)
   }
   const detectedCount = rawText.trim() ? (rawText.match(/^\d+\./gm) || []).length : 0
 
@@ -518,48 +594,7 @@ QUESTIONS TO CONVERT:
                   <pre style={{ margin:0, fontFamily:'ui-monospace,monospace', fontSize:12, lineHeight:1.7, color:'var(--bi-primary)', whiteSpace:'pre-wrap' }}>{formatTemplate}</pre>
                   <div style={{ fontSize:11.5, color:'var(--bi-primary)', opacity:0.8, marginTop:10 }}>Spacing around ":" is flexible — "Chapter: X", "Chapter:X", "Chapter : X" all work.</div>
 
-                  {/* MN Syntax reference */}
-                  <div style={{ marginTop:16, borderTop:'1px solid var(--bi-primary)', paddingTop:14, opacity:0.85 }}>
-                    <div style={{ fontSize:12, fontWeight:800, color:'var(--bi-primary)', marginBottom:10, letterSpacing:'0.04em', textTransform:'uppercase' }}>MN Syntax — Explanation Formatting</div>
-
-                    {/* Inline tokens */}
-                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px 20px', marginBottom:12 }}>
-                      {[
-                        { syntax: '**text**',   label: 'Bold'        },
-                        { syntax: '*text*',     label: 'Italic'      },
-                        { syntax: '==text==',   label: 'Highlight'   },
-                        { syntax: '!!text!!',   label: 'Callout box' },
-                        { syntax: '~~text~~',   label: 'Green text'  },
-                        { syntax: '::text::',   label: 'Blue text'   },
-                        { syntax: '__text__',   label: 'Underline'   },
-                      ].map(({ syntax, label }) => (
-                        <div key={label} style={{ display:'flex', alignItems:'center', gap:6, fontSize:11.5 }}>
-                          <code style={{ background:'rgba(255,255,255,0.5)', border:'1px solid var(--bi-primary)', borderRadius:4, padding:'1px 6px', fontFamily:'ui-monospace,monospace', fontSize:11, color:'var(--bi-primary)', whiteSpace:'nowrap' }}>{syntax}</code>
-                          <span style={{ color:'var(--bi-primary)', opacity:0.7 }}>{label}</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Image slots */}
-                    <div style={{ background:'rgba(255,255,255,0.4)', border:'1px solid var(--bi-primary)', borderRadius:8, padding:'8px 12px', marginBottom:8, fontSize:11.5, color:'var(--bi-primary)' }}>
-                      <div style={{ fontWeight:700, marginBottom:4 }}>Images — max 3 per explanation (upload after import)</div>
-                      <div style={{ display:'flex', flexDirection:'column', gap:2, fontFamily:'ui-monospace,monospace', fontSize:11 }}>
-                        <span>[Image Slot 1]</span>
-                        <span>[Image Slot 2]</span>
-                        <span>[Image Slot 3]</span>
-                      </div>
-                    </div>
-
-                    {/* Table */}
-                    <div style={{ background:'rgba(255,255,255,0.4)', border:'1px solid var(--bi-primary)', borderRadius:8, padding:'8px 12px', fontSize:11.5, color:'var(--bi-primary)' }}>
-                      <div style={{ fontWeight:700, marginBottom:4 }}>Table</div>
-                      <pre style={{ margin:0, fontFamily:'ui-monospace,monospace', fontSize:11, lineHeight:1.6, color:'var(--bi-primary)', whiteSpace:'pre' }}>{`[TABLE]
-| Column 1 | Column 2 |
-|----------|----------|
-| Value 1  | Value 2  |
-[/TABLE]`}</pre>
-                    </div>
-                  </div>
+                
                 </div>
               )}
             </div>
@@ -762,13 +797,13 @@ QUESTIONS TO CONVERT:
                       {copiedNames ? 'Copied!' : 'Copy'}
                     </button>
                     <button
-                      onClick={copyAsPrompt}
+                      onClick={handleCraftPromptClick}
                       style={{ display:'flex', alignItems:'center', gap:6, fontSize:11.5, fontWeight:700, color:'#7c3aed', background:'#f5f3ff', border:'1px solid #7c3aed', borderRadius:8, padding:'5px 10px', cursor:'pointer', fontFamily:'inherit', transition:'background 0.15s', flexShrink:0 }}
                       onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background='#ede9fe'}
                       onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background='#f5f3ff'}
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 8v4l3 3"/><path d="M18 2l4 4-4 4"/><path d="M22 2l-4 4"/></svg>
-                      {copiedPrompt ? 'Copied!' : 'Copy as AI Prompt'}
+                      {copiedPrompt ? 'Copied!' : 'Craft AI Prompt'}
                     </button>
                   </div>
                 </div>
@@ -973,6 +1008,115 @@ QUESTIONS TO CONVERT:
         )}
 
       </div>
+
+      {/* ── Doctor Assignment Modal ── */}
+      {showDoctorModal && examInfo && (() => {
+        const doctors = examInfo.doctors
+        const currentDoctor = doctors[doctorModalStep]
+        const isLast = doctorModalStep === doctors.length - 1
+        const currentNums = doctorAssignments[currentDoctor] || []
+        const allAssignedSoFar = Object.entries(doctorAssignments)
+          .filter(([doc]) => doc !== currentDoctor)
+          .flatMap(([, nums]) => nums)
+
+        return (
+          <div style={{ position:'fixed', inset:0, zIndex:1000, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+            <div style={{ background:'var(--bg-elev,#ffffff)', border:'1px solid var(--bd,#e5e5e5)', borderRadius:18, width:'100%', maxWidth:620, boxShadow:'0 8px 40px rgba(20,10,10,0.15)', display:'flex', flexDirection:'column', overflow:'hidden', height:'88vh' }}>
+
+              {/* Header */}
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'20px 24px 16px', borderBottom:'1px solid #e5e0da' }}>
+                <div style={{ fontSize:17, fontWeight:800, color:'#1a1a1a' }}>Craft AI Prompt</div>
+                <button onClick={() => setShowDoctorModal(false)} style={{ width:30, height:30, borderRadius:'50%', border:'1px solid #e5e0da', background:'#faf9f7', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', color:'#9a8a7a' }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+
+              {/* Progress bar */}
+              <div style={{ height:3, background:'#f0ece8' }}>
+                <div style={{ height:'100%', background:'oklch(50% 0.19 25)', transition:'width 0.3s ease', width:`${((doctorModalStep + 1) / doctors.length) * 100}%` }} />
+              </div>
+
+              {/* Doctor info */}
+              <div style={{ padding:'18px 24px 0' }}>
+                <div style={{ fontSize:11, fontWeight:800, color:'#9a8a7a', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:5 }}>
+                  Doctor {doctorModalStep + 1} of {doctors.length}
+                </div>
+                <div style={{ fontSize:14.5, fontWeight:800, color:'#1a1a1a', marginBottom:3 }}>
+                  Assign lectures to <span style={{ color:'oklch(50% 0.19 25)' }}>{currentDoctor}</span>
+                </div>
+                <div style={{ fontSize:12.5, color:'#9a8a7a', marginBottom:14 }}>
+                  Select the lectures this doctor teaches. Unselected lectures will be written without a doctor name.
+                </div>
+              </div>
+
+              {/* Lecture list */}
+              <div style={{ padding:'0 24px', overflowY:'auto', flex:'1 1 0', minHeight:0 }}>
+                {examInfo.chapters.map(chapterName => {
+                  const chapterLectures = pendingLectureNums.filter(l => l.chapterName === chapterName)
+                  if (chapterLectures.length === 0) return null
+                  return (
+                    <div key={chapterName} style={{ marginBottom:14 }}>
+                      <div style={{ fontSize:10.5, fontWeight:800, color:'#9a8a7a', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:7, paddingLeft:2 }}>
+                        {chapterName}
+                      </div>
+                      <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
+                        {chapterLectures.map(lec => {
+                          const isChecked = currentNums.includes(lec.num)
+                          const isTakenByOther = allAssignedSoFar.includes(lec.num)
+                          return (
+                            <label key={lec.num} style={{ display:'flex', alignItems:'center', gap:11, padding:'9px 13px', borderRadius:10, cursor: isTakenByOther ? 'default' : 'pointer', border:`1.5px solid ${isChecked ? 'oklch(50% 0.19 25)' : '#e5e0da'}`, background: isChecked ? 'oklch(94% 0.035 25)' : '#faf9f7', opacity: isTakenByOther ? 0.4 : 1, transition:'border-color 0.15s, background 0.15s' }}>
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                disabled={isTakenByOther}
+                                onChange={() => {
+                                  if (isTakenByOther) return
+                                  setDoctorAssignments(prev => {
+                                    const prevNums = prev[currentDoctor] || []
+                                    const updated = isChecked ? prevNums.filter(n => n !== lec.num) : [...prevNums, lec.num]
+                                    return { ...prev, [currentDoctor]: updated }
+                                  })
+                                }}
+                                style={{ accentColor:'oklch(50% 0.19 25)', width:15, height:15, flexShrink:0 }}
+                              />
+                              <span style={{ fontSize:12.5, color:'#9a8a7a', fontWeight:700, flexShrink:0, minWidth:20 }}>{lec.num}.</span>
+                              <span style={{ fontSize:13.5, fontWeight: isChecked ? 700 : 400, color: isChecked ? 'oklch(50% 0.19 25)' : '#1a1a1a', flex:1 }}>{lec.name}</span>
+                              {isTakenByOther && <span style={{ fontSize:11, color:'#9a8a7a', background:'#f0ece8', border:'1px solid #e5e0da', borderRadius:20, padding:'2px 8px', flexShrink:0 }}>taken</span>}
+                            </label>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+                <div style={{ height:16 }} />
+              </div>
+
+              {/* Footer */}
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'14px 24px 20px', borderTop:'1px solid #e5e0da', flexShrink:0 }}>
+                <button onClick={() => setShowDoctorModal(false)} style={{ background:'#f5f0ec', color:'#5a4a3a', border:'1px solid #e5e0da', borderRadius:11, padding:'10px 18px', fontSize:13.5, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>
+                  Cancel
+                </button>
+                <div style={{ display:'flex', gap:8 }}>
+                  {doctorModalStep > 0 && (
+                    <button onClick={() => setDoctorModalStep(s => s - 1)} style={{ background:'#f5f0ec', color:'#5a4a3a', border:'1px solid #e5e0da', borderRadius:11, padding:'10px 18px', fontSize:13.5, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>
+                      ← Back
+                    </button>
+                  )}
+                  <button
+                    onClick={() => { if (isLast) { buildAndCopyPrompt(doctorAssignments) } else { setDoctorModalStep(s => s + 1) } }}
+                    style={{ background:'oklch(50% 0.19 25)', color:'#fff', border:'none', borderRadius:11, padding:'10px 20px', fontSize:13.5, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}
+                  >
+                    {isLast ? '✓ Copy Prompt' : `Next → ${doctors[doctorModalStep + 1]}`}
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        )
+      })()}
+
     </>
   )
 }

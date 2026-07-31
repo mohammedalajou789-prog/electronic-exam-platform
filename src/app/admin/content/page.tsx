@@ -161,6 +161,7 @@ export default function ContentManagementPage() {
   const [batchSearchQuery, setBatchSearchQuery] = useState('')
   const [newBatchSubject, setNewBatchSubject] = useState('')
   const [newBatchName, setNewBatchName] = useState('')
+  const [newBatchCustomName, setNewBatchCustomName] = useState('')
   const [allBatchNames, setAllBatchNames] = useState<string[]>([])
 
   // New exam form state
@@ -347,12 +348,11 @@ export default function ContentManagementPage() {
   // ── Batch Actions ─────────────────────────────────────────────────────────
 
   async function addBatch() {
-    if (!newBatchName.trim() || !newBatchSubject) return
+    const finalName = newBatchName === '__new' ? newBatchCustomName.trim() : newBatchName.trim()
+    if (!finalName || !newBatchSubject) return
     setIsLoading(true)
-    const finalName = newBatchName === '__new' ? '' : newBatchName.trim()
-    if (!finalName) { setIsLoading(false); return }
     await supabase.from('batches').insert({ name: finalName, subject_id: newBatchSubject })
-    setNewBatchName(''); setNewBatchSubject('')
+    setNewBatchName(''); setNewBatchCustomName(''); setNewBatchSubject('')
     setShowBatchModal(false)
     await loadAll(); showToast('Batch added'); setIsLoading(false)
   }
@@ -372,7 +372,7 @@ export default function ContentManagementPage() {
       calendar_year: parseInt(newExamCalendarYear) || new Date().getFullYear(),
       exam_type: newExamType,
       status: newExamStatus,
-      timer_mode: 'none',
+      
       question_count: 0,
     } as any).select('id').single()
     if (error) { showToast(error.message, 'error'); setIsLoading(false); return }
@@ -468,12 +468,12 @@ export default function ContentManagementPage() {
 
   // ── Subject Row Component ─────────────────────────────────────────────────
 
-  function SubjectRow({ subject }: { subject: Subject }) {
+  const renderSubjectRow = (subject: Subject) => {
     const isExpanded = expandedSubject === subject.id
     const isClinical = !!subject.year_id
 
     return (
-      <div className="adm-card adm-row-fade" style={{ overflow: 'hidden' }}>
+      <div key={subject.id} className="adm-card adm-row-fade" style={{ overflow: 'hidden' }}>
         {/* Subject Header */}
         <div
           style={{
@@ -1050,9 +1050,7 @@ export default function ContentManagementPage() {
                   <div key={group.yearName}>
                     <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 12 }}>{group.yearName}</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                      {group.subjects.map(subject => (
-                        <SubjectRow key={subject.id} subject={subject} />
-                      ))}
+                      {group.subjects.map(subject => renderSubjectRow(subject))}
                     </div>
                   </div>
                 ))
@@ -1661,16 +1659,17 @@ export default function ContentManagementPage() {
                 className="adm-input"
                 placeholder="Enter new batch name..."
                 style={{ marginBottom: 12 }}
-                onChange={e => setNewBatchName(e.target.value)}
+                value={newBatchCustomName}
+                onChange={e => setNewBatchCustomName(e.target.value)}
                 autoFocus
               />
             )}
 
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
-              <button onClick={() => { setShowBatchModal(false); setNewBatchSubject(''); setNewBatchName('') }} className="adm-btn-ghost">Cancel</button>
+              <button onClick={() => { setShowBatchModal(false); setNewBatchSubject(''); setNewBatchName(''); setNewBatchCustomName('') }} className="adm-btn-ghost">Cancel</button>
               <button
                 onClick={addBatch}
-                disabled={isLoading || !newBatchName.trim() || newBatchName === '__new' || !newBatchSubject}
+                disabled={isLoading || !newBatchSubject || (newBatchName === '__new' ? !newBatchCustomName.trim() : !newBatchName.trim())}
                 className="adm-btn-primary"
               >
                 {isLoading ? <Loader2 width={15} height={15} className="animate-spin" /> : null}
