@@ -29,11 +29,154 @@ interface ExamInfo {
 type PdfMode = 'questions_only' | 'with_answers' | 'with_answers_and_explanation'
 
 const PDF_OPTIONS: { value: PdfMode; label: string }[] = [
-  { value: 'questions_only',              label: 'Questions only'                    },
-  { value: 'with_answers',               label: 'Questions with answers'            },
+  { value: 'questions_only',               label: 'Questions only'                    },
+  { value: 'with_answers',                label: 'Questions with answers'            },
   { value: 'with_answers_and_explanation', label: 'Questions, answers & explanations' },
 ]
 
+// ── MN Syntax → HTML parser ───────────────────────────────────────────────────
+//
+// Supported tokens (same as ExplanationRenderer on the website):
+//   **text**          → <strong>
+//   ==text==          → <mark> (highlight)
+//   ~~text~~          → <del>
+//   __text__          → <u> (underline)
+//   *text*            → <em>
+//   ::text::          → <code>
+//   !!text!!          → <span class="callout"> (warning box)
+//   [TABLE]…[/TABLE] → <table>
+//   blank line        → paragraph break
+//
+function parseMN(raw: string): string {
+  if (!raw) return ''
+
+  // ── 1. Tables ──────────────────────────────────────────────────────────────
+  raw = raw.replace(
+    /\[TABLE\]([\s\S]*?)\[\/TABLE\]/gi,
+    (_match, content: string) => {
+      const rows = content
+        .trim()
+        .split('\n')
+        .map(r => r.trim())
+        .filter(r => r.startsWith('|') && r.endsWith('|'))
+
+      if (rows.length === 0) return ''
+
+      const parsed = rows.map(row =>
+        row
+          .slice(1, -1)          // remove leading/trailing |
+          .split('|')
+          .map(cell => cell.trim())
+      )
+
+      // Row index 1 is the separator (---) — skip it
+      const header = parsed[0]
+      const body   = parsed.slice(2)
+
+      const th = header
+        .map(h => `<th style="padding:6px 12px;border:1px solid #ccc;background:#f5f5f5;font-weight:700;font-size:12px;text-align:left;">${h}</th>`)
+        .join('')
+      const trs = body
+        .map(row =>
+          '<tr>' +
+          row
+            .map(cell => `<td style="padding:6px 12px;border:1px solid #ccc;font-size:12px;">${cell}</td>`)
+            .join('') +
+          '</tr>'
+        )
+        .join('')
+
+      return `<table style="border-collapse:collapse;width:100%;margin:10px 0;font-family:inherit;">
+        <thead><tr>${th}</tr></thead>
+        <tbody>${trs}</tbody>
+      </table>`
+    }
+  )
+
+  // ── 2. Inline tokens ───────────────────────────────────────────────────────
+  const escape = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+  // Process line by line so paragraph breaks work
+  const lines = raw.split('\n')
+  const outLines: string[] = []
+  let inParagraph = false
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+
+    if (line === '') {
+      // blank line = paragraph break
+      if (inParagraph) {
+        outLines.push('</p>')
+        inParagraph = false
+      }
+      continue
+    }
+
+    // If the line is already an HTML block (table injected above), emit as-is
+    if (line.startsWith('<table')) {
+      if (inParagraph) { outLines.push('</p>'); inParagraph = false }
+      outLines.push(line)
+      continue
+    }
+
+    // Apply inline replacements
+    let out = line
+      // !!callout!!
+      .replace(/!!([\s\S]*?)!!/g, (_m, t) =>
+        `<span style="display:inline-block;background:#fff8e1;border:1px solid #f59e0b;border-radius:6px;padding:2px 8px;color:#92400e;font-weight:600;font-size:11.5px;">⚠ ${escape(t)}</span>`)
+      // **bold**
+      .replace(/\*\*([\s\S]*?)\*\*/g, (_m, t) => `<strong>${escape(t)}</strong>`)
+      // ==highlight==
+      .replace(/==([\s\S]*?)==/g, (_m, t) =>
+        `<mark style="background:#fde68a;border-radius:3px;padding:0 2px;">${escape(t)}</mark>`)
+      // ~~strikethrough~~
+      .replace(/~~([\s\S]*?)~~/g, (_m, t) => `<del>${escape(t)}</del>`)
+      // __underline__
+      .replace(/__([\s\S]*?)__/g, (_m, t) => `<u>${escape(t)}</u>`)
+      // *italic*
+      .replace(/\*([\s\S]*?)\*/g, (_m, t) => `<em>${escape(t)}</em>`)
+      // ::code::
+      .replace(/::([\s\S]*?)::/g, (_m, t) =>
+        `<code style="background:#f3f4f6;border-radius:4px;padding:1px 5px;font-size:11.5px;font-family:monospace;">${escape(t)}</code>`)
+
+    if (!inParagraph) {
+      outLines.push('<p style="margin:0 0 6px;line-height:1.6;">')
+      inParagraph = true
+    }
+    outLines.push(out)
+  }
+
+  if (inParagraph) outLines.push('</p>')
+
+  return outLines.join('\n')
+}
+
+// ── Explanation block ─────────────────────────────────────────────────────────
+function ExplanationBlock({ text }: { text: string }) {
+  return (
+    <div style={{
+      marginTop: 12, padding: '12px 14px', borderRadius: 10,
+      background: 'color-mix(in srgb, var(--accent-green) 8%, white)',
+      border: '1px solid var(--accent-green)',
+    }}>
+      <div style={{
+        fontSize: 10, fontWeight: 800, letterSpacing: '0.5px',
+        color: 'var(--accent-green)', marginBottom: 6,
+        textTransform: 'uppercase',
+      }}>
+        Explanation
+      </div>
+      <div
+        style={{ fontSize: 13.5, color: 'var(--fg)', lineHeight: 1.6 }}
+        dangerouslySetInnerHTML={{ __html: parseMN(text) }}
+      />
+    </div>
+  )
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
 export default function PdfPage() {
   const params  = useParams()
   const examId  = params.examId as string
@@ -200,7 +343,7 @@ export default function PdfPage() {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="6 9 6 2 18 2 18 9" />
               <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
-              <rect x="6" y="14" width="12" height="8" />
+              <rect x="6" y="14" width="12" height="8" rx="1" />
             </svg>
             Print / Save PDF
           </button>
@@ -355,24 +498,9 @@ export default function PdfPage() {
                 })}
               </div>
 
-              {/* Explanation */}
+              {/* Explanation — parsed MN Syntax */}
               {showExplanation && q.explanation && (
-                <div style={{
-                  marginTop: 12, padding: '12px 14px', borderRadius: 10,
-                  background: 'color-mix(in srgb, var(--accent-green) 8%, white)',
-                  border: '1px solid var(--accent-green)',
-                }}>
-                  <div style={{
-                    fontSize: 10, fontWeight: 800, letterSpacing: '0.5px',
-                    color: 'var(--accent-green)', marginBottom: 4,
-                    textTransform: 'uppercase',
-                  }}>
-                    Explanation
-                  </div>
-                  <div style={{ fontSize: 13.5, color: 'var(--fg)', lineHeight: 1.55 }}>
-                    {q.explanation}
-                  </div>
-                </div>
+                <ExplanationBlock text={q.explanation} />
               )}
             </div>
           ))}
