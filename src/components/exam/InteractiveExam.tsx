@@ -53,8 +53,8 @@ interface Props {
   exam: Exam
   questions: Question[]
   savedProgress: SavedProgress | null
-  subjectName: string
-  batchName: string
+  subjectName?: string
+  batchName?: string
 }
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
@@ -569,7 +569,7 @@ export default function InteractiveExam({
               marginBottom: 2,
             }}
           >
-            {subjectName}
+            {subjectName ?? 'Custom Exam'}
             {batchName ? ` · ${batchName}` : ''} · {eyebrow}
           </div>
           <div
