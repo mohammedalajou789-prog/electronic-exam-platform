@@ -1,4 +1,7 @@
-﻿import Link from 'next/link'
+﻿// PAGE: Academic Year
+// URL:  /{year}  →  e.g. /fourth-year
+// SHOWS: List of subjects (clinical) OR list of semesters (pre-clinical)
+import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { ChevronRight } from 'lucide-react'
@@ -58,7 +61,7 @@ export default async function AcademicYearPage({ params }: PageProps) {
   return (
     <div style={{ background: 'var(--bg)', color: 'var(--fg)', fontFamily: '"Plus Jakarta Sans", system-ui, sans-serif', width: '100%', overflowX: 'hidden' }}>
       <style>{`
-        .year-page-main { max-width: 1180px; margin: 0 auto; padding: 32px 24px 24px; box-sizing: border-box; width: 100%; }
+        .year-page-main { padding: 32px 28px 24px; box-sizing: border-box; width: 100%; }
         .year-page-title { font-size: 26px; }
         .year-page-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
         .sem-card { display: flex; align-items: center; gap: 16px; background: var(--bg-elev); border: 1px solid var(--bd); border-radius: 18px; padding: 20px; text-decoration: none; color: inherit; transition: transform 0.2s, box-shadow 0.2s; width: 100%; box-sizing: border-box; }

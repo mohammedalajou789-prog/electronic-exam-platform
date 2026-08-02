@@ -249,8 +249,8 @@ export default function Navbar() {
         backdropFilter: 'blur(10px)',
       }}>
         <div style={{
-          maxWidth: 1180, margin: '0 auto',
-          padding: '0 20px', height: 60,
+          width: '100%',
+          padding: '0 28px', height: 60,
           display: 'flex', alignItems: 'center', gap: 12,
         }}>
 

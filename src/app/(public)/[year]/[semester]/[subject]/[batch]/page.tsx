@@ -1,4 +1,8 @@
-﻿import Link from 'next/link'
+﻿// PAGE: Batch exams list (pre-clinical only)
+// URL:  /{year}/{semester}/{subject}/{batch}
+// PRE-CLINICAL: [batch] = batch slug → shows exams
+// CLINICAL: this route is never reached
+import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 
@@ -111,7 +115,7 @@ export default async function BatchPage({ params }: PageProps) {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)', fontFamily: '"Plus Jakarta Sans", system-ui, sans-serif' }}>
-      <main style={{ maxWidth: 1180, margin: '0 auto', padding: '32px 24px 80px' }}>
+      <main style={{ padding: '32px 0 80px' }}>
 
         {/* Breadcrumb */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', fontSize: 13, color: 'var(--fg-muted)', marginBottom: 18 }}>

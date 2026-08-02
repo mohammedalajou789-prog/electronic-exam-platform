@@ -1,6 +1,6 @@
 ﻿'use client'
 
-import { useParams, useRouter } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
@@ -26,30 +26,36 @@ interface ExamInfo {
   batch_name: string
 }
 
+type PdfMode = 'questions_only' | 'with_answers' | 'with_answers_and_explanation'
+
+const PDF_OPTIONS: { value: PdfMode; label: string }[] = [
+  { value: 'questions_only',              label: 'Questions only'                    },
+  { value: 'with_answers',               label: 'Questions with answers'            },
+  { value: 'with_answers_and_explanation', label: 'Questions, answers & explanations' },
+]
+
 export default function PdfPage() {
   const params  = useParams()
-  const router  = useRouter()
   const examId  = params.examId as string
 
-  const [questions,  setQuestions]  = useState<Question[]>([])
-  const [examInfo,   setExamInfo]   = useState<ExamInfo>({ title: '', doctor_name: '', subject_name: '', batch_name: '' })
-  const [loading,    setLoading]    = useState(true)
-  const [showAnswer, setShowAnswer] = useState(true)
+  const [questions,   setQuestions]  = useState<Question[]>([])
+  const [examInfo,    setExamInfo]   = useState<ExamInfo>({ title: '', doctor_name: '', subject_name: '', batch_name: '' })
+  const [loading,     setLoading]    = useState(true)
+  const [pdfMode,     setPdfMode]    = useState<PdfMode>('with_answers')
   const printRef = useRef<HTMLDivElement>(null)
-// إخفاء الـ Navbar عند الطباعة فقط
+
+  const showAnswers     = pdfMode === 'with_answers' || pdfMode === 'with_answers_and_explanation'
+  const showExplanation = pdfMode === 'with_answers_and_explanation'
+
+  // Hide navbar when printing
   useEffect(() => {
     const style = document.createElement('style')
     style.id = 'pdf-hide-nav'
     style.innerHTML = `@media print { header { display: none !important; } nav { display: none !important; } }`
     document.head.appendChild(style)
-
-    
-
-    return () => {
-      document.getElementById('pdf-hide-nav')?.remove()
-      
-    }
+    return () => { document.getElementById('pdf-hide-nav')?.remove() }
   }, [])
+
   useEffect(() => {
     if (!examId) return
     loadData()
@@ -66,10 +72,10 @@ export default function PdfPage() {
 
     if (exam) {
       setExamInfo({
-        title: exam.title,
-        doctor_name: (exam.doctors as any)?.name || '',
+        title:        exam.title,
+        doctor_name:  (exam.doctors as any)?.name || '',
         subject_name: (exam.batches as any)?.subjects?.name || '',
-        batch_name: (exam.batches as any)?.name || '',
+        batch_name:   (exam.batches as any)?.name || '',
       })
     }
 
@@ -95,10 +101,6 @@ export default function PdfPage() {
     setLoading(false)
   }
 
-  function handlePrint() {
-    window.print()
-  }
-
   const choices = (q: Question) => [
     { key: 'a', text: q.choice_a },
     { key: 'b', text: q.choice_b },
@@ -121,13 +123,13 @@ export default function PdfPage() {
 
   return (
     <>
-      {/* Print styles */}
+      {/* ─── Print styles ─────────────────────────────────────── */}
       <style>{`
         @media print {
-          .no-print { display: none !important; }
+          .no-print  { display: none !important; }
           .print-area { margin: 0 !important; padding: 0 !important; }
-          body { background: white !important; }
-          @page { margin: 1.5cm; }
+          body        { background: white !important; }
+          @page       { margin: 1.5cm; }
           body > div > footer { display: none !important; }
         }
         @media screen {
@@ -135,66 +137,67 @@ export default function PdfPage() {
         }
       `}</style>
 
-      {/* Toolbar — hidden on print */}
+      {/* ─── Toolbar (hidden on print) ────────────────────────── */}
       <div className="no-print" style={{
         position: 'sticky', top: 0, zIndex: 40,
-        background: 'var(--bg-elev)', borderBottom: '1px solid var(--bd)',
+        background: 'var(--bg-elev)',
+        borderBottom: '1px solid var(--bd)',
         backdropFilter: 'blur(10px)',
       }}>
         <div style={{
-          maxWidth: 1180, margin: '0 auto', padding: '14px 24px',
-          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+          padding: '14px 28px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 24,
         }}>
-          {/* Back */}
-          <button onClick={() => router.back()} style={{
-            width: 38, height: 38, flexShrink: 0,
-            borderRadius: 11, border: '1px solid var(--bd)',
-            background: 'var(--bg-soft)', color: 'var(--fg)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer',
-          }}>
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" strokeWidth="2.2"
-              strokeLinecap="round" strokeLinejoin="round">
-              <path d="M19 12H5M12 19l-7-7 7-7" />
-            </svg>
-          </button>
 
-          {/* Title */}
-          <div style={{ flex: '1 1 auto', minWidth: 0 }}>
-            <div style={{ fontSize: 12, color: 'var(--fg-muted)', fontWeight: 600 }}>
-              PDF Export
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--fg)' }}>
-              {examInfo.title}
-            </div>
+          {/* Left — three radio options stacked */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+            {PDF_OPTIONS.map(opt => (
+              <label
+                key={opt.value}
+                onClick={() => setPdfMode(opt.value)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  cursor: 'pointer', userSelect: 'none',
+                }}
+              >
+                {/* Custom radio circle */}
+                <span style={{
+                  width: 17, height: 17, borderRadius: '50%', flexShrink: 0,
+                  border: pdfMode === opt.value
+                    ? '5px solid var(--primary)'
+                    : '1.5px solid var(--bd-strong, #bbb)',
+                  background: 'transparent',
+                  display: 'inline-block',
+                  transition: 'border 0.15s ease',
+                }} />
+                <span style={{
+                  fontSize: 13.5,
+                  fontWeight: pdfMode === opt.value ? 600 : 400,
+                  color: pdfMode === opt.value ? 'var(--fg)' : 'var(--fg-muted)',
+                  transition: 'color 0.15s ease',
+                }}>
+                  {opt.label}
+                </span>
+              </label>
+            ))}
           </div>
 
-          {/* Toggle answers */}
-          <label style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            fontSize: 13.5, fontWeight: 600, color: 'var(--fg)',
-            cursor: 'pointer',
-          }}>
-            <input
-              type="checkbox"
-              checked={showAnswer}
-              onChange={e => setShowAnswer(e.target.checked)}
-              style={{ width: 16, height: 16, cursor: 'pointer' }}
-            />
-            Show answers & explanations
-          </label>
-
-          {/* Print button */}
-          <button onClick={handlePrint} style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            padding: '10px 20px', borderRadius: 11, border: 'none',
-            background: 'var(--primary)', color: 'white',
-            fontSize: 14, fontWeight: 700, cursor: 'pointer',
-          }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" strokeWidth="2.2"
-              strokeLinecap="round" strokeLinejoin="round">
+          {/* Right — print button */}
+          <button
+            onClick={() => window.print()}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '11px 22px', borderRadius: 11, border: 'none',
+              background: 'var(--primary)', color: 'white',
+              fontSize: 14, fontWeight: 700,
+              cursor: 'pointer', flexShrink: 0,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="6 9 6 2 18 2 18 9" />
               <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
               <rect x="6" y="14" width="12" height="8" />
@@ -204,7 +207,7 @@ export default function PdfPage() {
         </div>
       </div>
 
-      {/* Print content */}
+      {/* ─── PDF content ──────────────────────────────────────── */}
       <div ref={printRef} className="print-area">
 
         {/* Cover */}
@@ -212,7 +215,6 @@ export default function PdfPage() {
           textAlign: 'center', padding: '40px 24px 32px',
           borderBottom: '2px solid var(--bd)', marginBottom: 32,
         }}>
-          {/* Logo + Team name */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 24 }}>
             <img
               src="/images/logo.jpg"
@@ -231,25 +233,24 @@ export default function PdfPage() {
           }}>
             MEDICAL CLUB — EXAM PLATFORM
           </div>
-          <div style={{
-            fontSize: 28, fontWeight: 800, color: 'var(--fg)', marginBottom: 8,
-          }}>
+
+          <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--fg)', marginBottom: 8 }}>
             {examInfo.title}
           </div>
+
           {examInfo.doctor_name && (
             <div style={{ fontSize: 15, color: 'var(--fg-muted)', fontWeight: 600 }}>
               Dr. {examInfo.doctor_name}
             </div>
           )}
+
           {(examInfo.subject_name || examInfo.batch_name) && (
             <div style={{ fontSize: 13, color: 'var(--fg-muted)', fontWeight: 600, marginTop: 4 }}>
-              {examInfo.subject_name} {examInfo.batch_name && `· ${examInfo.batch_name}`}
+              {examInfo.subject_name}{examInfo.batch_name && ` · ${examInfo.batch_name}`}
             </div>
           )}
-          <div style={{
-            display: 'flex', justifyContent: 'center', gap: 24,
-            marginTop: 20, flexWrap: 'wrap',
-          }}>
+
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 24, marginTop: 20, flexWrap: 'wrap' }}>
             <div style={{
               padding: '8px 18px', borderRadius: 10,
               background: 'var(--bg-soft)', border: '1px solid var(--bd)',
@@ -257,7 +258,7 @@ export default function PdfPage() {
             }}>
               {questions.length} Questions
             </div>
-            {showAnswer && (
+            {showAnswers && (
               <div style={{
                 padding: '8px 18px', borderRadius: 10,
                 background: 'color-mix(in srgb, var(--accent-green) 12%, var(--bg-soft))',
@@ -270,7 +271,7 @@ export default function PdfPage() {
           </div>
         </div>
 
-        {/* Questions */}
+        {/* Questions list */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
           {questions.map((q, i) => (
             <div key={q.id} style={{
@@ -307,10 +308,7 @@ export default function PdfPage() {
               </div>
 
               {/* Question text */}
-              <div style={{
-                fontSize: 16, fontWeight: 700, color: 'var(--fg)',
-                lineHeight: 1.6, marginBottom: 14,
-              }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--fg)', lineHeight: 1.6, marginBottom: 14 }}>
                 {q.question_text}
               </div>
 
@@ -325,21 +323,19 @@ export default function PdfPage() {
                 </div>
               )}
 
-              {/* Choices */}
+              {/* Answer choices */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {choices(q).map(opt => {
-                  const isCorrect = showAnswer && opt.key === q.correct_answer
+                  const isCorrect = showAnswers && opt.key === q.correct_answer
                   return (
                     <div key={opt.key} style={{
                       display: 'flex', alignItems: 'center', gap: 10,
                       padding: '10px 14px', borderRadius: 10,
-                      border: isCorrect
-                        ? '1.5px solid var(--accent-green)'
-                        : '1px solid var(--bd)',
+                      border: isCorrect ? '1.5px solid var(--accent-green)' : '1px solid var(--bd)',
                       background: isCorrect
                         ? 'color-mix(in srgb, var(--accent-green) 10%, white)'
                         : 'var(--bg-soft)',
-                      opacity: showAnswer && !isCorrect ? 0.6 : 1,
+                      opacity: showAnswers && !isCorrect ? 0.6 : 1,
                     }}>
                       <span style={{
                         width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
@@ -360,7 +356,7 @@ export default function PdfPage() {
               </div>
 
               {/* Explanation */}
-              {showAnswer && q.explanation && (
+              {showExplanation && q.explanation && (
                 <div style={{
                   marginTop: 12, padding: '12px 14px', borderRadius: 10,
                   background: 'color-mix(in srgb, var(--accent-green) 8%, white)',
@@ -403,10 +399,7 @@ export default function PdfPage() {
               {examInfo.subject_name && `${examInfo.subject_name} · `}{questions.length} Questions
             </div>
           </div>
-          <div style={{
-            fontSize: 11, color: 'var(--fg-muted)', fontWeight: 600,
-            textAlign: 'right',
-          }}>
+          <div style={{ fontSize: 11, color: 'var(--fg-muted)', fontWeight: 600, textAlign: 'right' }}>
             © {new Date().getFullYear()} Medical Club<br />
             Exam Platform
           </div>

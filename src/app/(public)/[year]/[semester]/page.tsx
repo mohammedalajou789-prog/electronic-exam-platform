@@ -1,4 +1,8 @@
-﻿import Link from 'next/link'
+﻿// PAGE: Subject (clinical) OR Semester (pre-clinical)
+// URL:  /{year}/{semester}
+// CLINICAL:     [semester] = subject slug  →  shows batches
+// PRE-CLINICAL: [semester] = semester slug →  shows subjects
+import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import CustomExamBuilder from '@/components/exam/CustomExamBuilder'
@@ -75,7 +79,7 @@ export default async function SemesterOrSubjectPage({ params }: PageProps) {
 
     return (
       <div style={{ background: 'var(--bg)', color: 'var(--fg)', fontFamily: '"Plus Jakarta Sans", system-ui, sans-serif' }}>
-        <main style={{ maxWidth: 1180, margin: '0 auto', padding: '32px 24px 24px' }}>
+        <main style={{ padding: '32px 28px 24px' }}>
 
           {/* Breadcrumb */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', fontSize: 13, color: 'var(--fg-muted)', marginBottom: 18 }}>
@@ -171,7 +175,7 @@ export default async function SemesterOrSubjectPage({ params }: PageProps) {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)', fontFamily: '"Plus Jakarta Sans", system-ui, sans-serif' }}>
-      <main style={{ maxWidth: 1180, margin: '0 auto', padding: '32px 24px 80px' }}>
+      <main style={{ padding: '32px 28px 80px' }}>
 
         {/* Breadcrumb */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', fontSize: 13, color: 'var(--fg-muted)', marginBottom: 18 }}>

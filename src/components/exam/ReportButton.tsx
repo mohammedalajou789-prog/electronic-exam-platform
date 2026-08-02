@@ -1,7 +1,6 @@
 ﻿'use client'
 
 import { useState } from 'react'
-import { AlertCircle, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
 interface Props {
@@ -29,7 +28,6 @@ export default function ReportButton({ questionId }: Props) {
   async function handleSubmit() {
     if (!category) return
     setIsSubmitting(true)
-
     const supabase = createClient()
     await supabase.from('reports').insert({
       question_id: questionId,
@@ -37,7 +35,6 @@ export default function ReportButton({ questionId }: Props) {
       description: description.trim() || null,
       status: 'new',
     })
-
     setIsDone(true)
     setIsSubmitting(false)
     setTimeout(() => {
@@ -48,88 +45,162 @@ export default function ReportButton({ questionId }: Props) {
     }, 2000)
   }
 
+  function handleClose() {
+    setIsOpen(false)
+    setCategory('')
+    setDescription('')
+    setIsDone(false)
+  }
+
   return (
     <>
       <button
         onClick={() => setIsOpen(true)}
-        className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-        title="Report an issue"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 7,
+          padding: '9px 16px',
+          borderRadius: 11,
+          border: '1px solid var(--primary)',
+          background: 'color-mix(in srgb, var(--primary) 12%, var(--bg-elev))',
+          color: 'var(--primary)',
+          fontWeight: 700,
+          fontSize: 13.5,
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+        }}
       >
-        <AlertCircle className="h-3.5 w-3.5" />
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 8v5M12 16h.01" />
+        </svg>
         Report Issue
       </button>
 
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-sm rounded-2xl border border-border/60 bg-card p-5 shadow-xl">
-
+        <>
+          <div
+            onClick={handleClose}
+            style={{
+              position: 'fixed', inset: 0,
+              background: 'rgba(0,0,0,.45)',
+              zIndex: 200,
+            }}
+          />
+          <div
+            style={{
+              position: 'fixed',
+              top: '50%', left: '50%',
+              transform: 'translate(-50%,-50%)',
+              width: 'min(480px, 90vw)',
+              background: 'var(--bg-elev)',
+              borderRadius: 18,
+              border: '1px solid var(--border)',
+              padding: '22px 24px',
+              zIndex: 201,
+              fontFamily: 'inherit',
+            }}
+          >
             {isDone ? (
-              <div className="py-4 text-center">
-                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-green-100">
-                  <AlertCircle className="h-6 w-6 text-green-600" />
+              <div style={{ padding: '16px 0', textAlign: 'center' }}>
+                <div style={{
+                  width: 48, height: 48, borderRadius: '50%',
+                  background: 'color-mix(in srgb, var(--accent-green) 15%, var(--bg-soft))',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  margin: '0 auto 12px',
+                }}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20 6L9 17l-5-5" />
+                  </svg>
                 </div>
-                <p className="font-semibold">Report Submitted</p>
-                <p className="text-sm text-muted-foreground">Thank you for helping improve the platform.</p>
+                <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--fg)', marginBottom: 6 }}>Report Submitted</div>
+                <div style={{ fontSize: 13.5, color: 'var(--fg-muted)' }}>Thank you for helping improve the platform.</div>
               </div>
             ) : (
               <>
-                <div className="mb-4 flex items-center justify-between">
-                  <h3 className="font-semibold">Report an Issue</h3>
-                  <button onClick={() => setIsOpen(false)}>
-                    <X className="h-5 w-5 text-muted-foreground" />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+                  <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--fg)' }}>Report an Issue</div>
+                  <button
+                    onClick={handleClose}
+                    style={{
+                      width: 30, height: 30, borderRadius: 9,
+                      border: '1px solid var(--border)',
+                      background: 'var(--bg-soft)', color: 'var(--fg)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+                      <path d="M18 6L6 18M6 6l12 12" />
+                    </svg>
                   </button>
                 </div>
 
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Issue Type</label>
-                    <select
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black"
-                      value={category}
-                      onChange={e => setCategory(e.target.value)}
-                    >
-                      <option value="">Select issue type</option>
-                      {categories.map(c => (
-                        <option key={c.value} value={c.value}>{c.label}</option>
-                      ))}
-                    </select>
-                  </div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>Issue Type</div>
+                <select
+                  value={category}
+                  onChange={e => setCategory(e.target.value)}
+                  style={{
+                    width: '100%', padding: '11px 12px', borderRadius: 11,
+                    border: '1px solid var(--border)', background: 'var(--bg-soft)',
+                    color: 'var(--fg)', fontSize: 14, fontFamily: 'inherit',
+                    marginBottom: 16, outline: 'none',
+                  }}
+                >
+                  <option value="">Select issue type</option>
+                  {categories.map(c => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
+                  ))}
+                </select>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Description (Optional)
-                    </label>
-                    <textarea
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
-                      rows={3}
-                      placeholder="Describe the issue..."
-                      value={description}
-                      onChange={e => setDescription(e.target.value)}
-                    />
-                  </div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>Description (Optional)</div>
+                <textarea
+                  value={description}
+                  onChange={e => setDescription(e.target.value)}
+                  placeholder="Describe the issue..."
+                  style={{
+                    width: '100%', minHeight: 84, padding: '11px 12px',
+                    borderRadius: 11, border: '1px solid var(--border)',
+                    background: 'var(--bg-soft)', color: 'var(--fg)',
+                    fontSize: 14, fontFamily: 'inherit', resize: 'vertical',
+                    marginBottom: 18, outline: 'none',
+                  }}
+                />
 
-                  <div className="flex gap-2 pt-1">
-                    <button
-                      onClick={() => setIsOpen(false)}
-                      className="flex-1 rounded-lg border border-gray-300 py-2 text-sm font-medium hover:bg-gray-50"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleSubmit}
-                      disabled={!category || isSubmitting}
-                      className="flex-1 rounded-lg bg-black py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
-                    >
-                      {isSubmitting ? 'Submitting...' : 'Submit Report'}
-                    </button>
-                  </div>
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={handleClose}
+                    style={{
+                      padding: '10px 18px', borderRadius: 11,
+                      border: '1px solid var(--border)', background: 'transparent',
+                      color: 'var(--fg)', fontWeight: 700, fontSize: 14,
+                      cursor: 'pointer', fontFamily: 'inherit',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSubmit}
+                    disabled={!category || isSubmitting}
+                    style={{
+                      padding: '10px 18px', borderRadius: 11, border: 'none',
+                      background: 'var(--primary)',
+                      color: 'white',
+                      fontWeight: 700, fontSize: 14,
+                      cursor: !category || isSubmitting ? 'not-allowed' : 'pointer',
+                      opacity: !category || isSubmitting ? 0.5 : 1,
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    {isSubmitting ? 'Submitting...' : 'Submit Report'}
+                  </button>
                 </div>
               </>
             )}
           </div>
-        </div>
+        </>
       )}
     </>
   )
 }
-
