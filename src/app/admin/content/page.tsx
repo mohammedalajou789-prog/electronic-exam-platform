@@ -185,6 +185,9 @@ export default function ContentManagementPage() {
   // Per-subject inline forms
   const [newDoctorName, setNewDoctorName] = useState<Record<string, string>>({})
   const [newDoctorDept, setNewDoctorDept] = useState<Record<string, string>>({})
+  const [allDoctors, setAllDoctors] = useState<Doctor[]>([])
+  const [doctorMode, setDoctorMode] = useState<Record<string, 'select' | 'new'>>({})
+  const [selectedDoctorId, setSelectedDoctorId] = useState<Record<string, string>>({})
   const [newChapterName, setNewChapterName] = useState<Record<string, string>>({})
   const [newLectureName, setNewLectureName] = useState<Record<string, string>>({})
   const [selectedChapter, setSelectedChapter] = useState<Record<string, string>>({})
@@ -192,7 +195,7 @@ export default function ContentManagementPage() {
   // ── Load ──────────────────────────────────────────────────────────────────
 
   const loadAll = useCallback(async () => {
-    const [yearsRes, semsRes, subsRes, batchesRes, examsRes, questionsCountRes] = await Promise.all([
+    const [yearsRes, semsRes, subsRes, batchesRes, examsRes, questionsCountRes, doctorsRes] = await Promise.all([
       supabase.from('academic_years').select('id, name, is_clinical').order('display_order'),
       supabase.from('semesters').select('*').order('display_order'),
       supabase.from('subjects').select(`
@@ -204,9 +207,11 @@ export default function ContentManagementPage() {
       supabase.from('batches').select('*').order('name'),
       supabase.from('exams').select('*').order('created_at', { ascending: false }),
       supabase.from('questions').select('id, exam_id').is('deleted_at', null),
+      supabase.from('doctors').select('id, name, department').order('name'),
     ])
     setAcademicYears(yearsRes.data || [])
     setSemesters(semsRes.data || [])
+    setAllDoctors((doctorsRes.data || []) as Doctor[])
     const subsData = (subsRes.data || []) as Subject[]
     setSubjects(subsData)
     const batchesData = (batchesRes.data || []) as Batch[]
@@ -286,18 +291,31 @@ export default function ContentManagementPage() {
   // ── Doctor Actions ────────────────────────────────────────────────────────
 
   async function addDoctorToSubject(subjectId: string) {
-    const name = (newDoctorName[subjectId] || '').trim()
-    if (!name) return
+    const mode = doctorMode[subjectId] || 'select'
     setIsLoading(true)
-    const { data: doc, error } = await supabase
-      .from('doctors')
-      .insert({ name, department: (newDoctorDept[subjectId] || '').trim() || null })
-      .select('id')
-      .single()
-    if (error || !doc) { showToast(error?.message || 'Error', 'error'); setIsLoading(false); return }
-    await supabase.from('subject_doctors').insert({ subject_id: subjectId, doctor_id: doc.id })
+
+    let doctorId: string | null = null
+
+    if (mode === 'select') {
+      doctorId = selectedDoctorId[subjectId] || null
+      if (!doctorId) { setIsLoading(false); return }
+    } else {
+      const name = (newDoctorName[subjectId] || '').trim()
+      if (!name) { setIsLoading(false); return }
+      const { data: doc, error } = await supabase
+        .from('doctors')
+        .insert({ name, department: (newDoctorDept[subjectId] || '').trim() || null })
+        .select('id')
+        .single()
+      if (error || !doc) { showToast(error?.message || 'Error', 'error'); setIsLoading(false); return }
+      doctorId = doc.id
+    }
+
+    await supabase.from('subject_doctors').insert({ subject_id: subjectId, doctor_id: doctorId })
     setNewDoctorName(p => ({ ...p, [subjectId]: '' }))
     setNewDoctorDept(p => ({ ...p, [subjectId]: '' }))
+    setSelectedDoctorId(p => ({ ...p, [subjectId]: '' }))
+    setDoctorMode(p => ({ ...p, [subjectId]: 'select' }))
     await loadAll(); showToast('Doctor added'); setIsLoading(false)
   }
 
@@ -558,27 +576,89 @@ export default function ContentManagementPage() {
                   ))}
                 </div>
               )}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 10 }}>
-                <input
-                  className="adm-input"
-                  placeholder="Doctor name (e.g. Dr. Ahmad)"
-                  value={newDoctorName[subject.id] || ''}
-                  onChange={e => setNewDoctorName(p => ({ ...p, [subject.id]: e.target.value }))}
-                />
-                <input
-                  className="adm-input"
-                  placeholder="Department (optional)"
-                  value={newDoctorDept[subject.id] || ''}
-                  onChange={e => setNewDoctorDept(p => ({ ...p, [subject.id]: e.target.value }))}
-                />
+              {/* Mode toggle */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
                 <button
-                  onClick={() => addDoctorToSubject(subject.id)}
-                  disabled={isLoading || !(newDoctorName[subject.id] || '').trim()}
-                  className="adm-btn-ghost"
+                  type="button"
+                  onClick={() => setDoctorMode(p => ({ ...p, [subject.id]: 'select' }))}
+                  style={{
+                    padding: '5px 14px', borderRadius: 20, fontSize: 12.5, fontWeight: 700,
+                    border: `1.5px solid ${(doctorMode[subject.id] || 'select') === 'select' ? 'var(--clr-primary)' : 'var(--bd)'}`,
+                    background: (doctorMode[subject.id] || 'select') === 'select' ? 'var(--clr-soft)' : 'var(--bg-soft)',
+                    color: (doctorMode[subject.id] || 'select') === 'select' ? 'var(--clr-primary)' : 'var(--fg-muted)',
+                    cursor: 'pointer', fontFamily: 'inherit',
+                  }}
                 >
-                  {isLoading ? <Loader2 width={14} height={14} className="animate-spin" /> : 'Add'}
+                  Select Existing
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDoctorMode(p => ({ ...p, [subject.id]: 'new' }))}
+                  style={{
+                    padding: '5px 14px', borderRadius: 20, fontSize: 12.5, fontWeight: 700,
+                    border: `1.5px solid ${doctorMode[subject.id] === 'new' ? 'var(--clr-primary)' : 'var(--bd)'}`,
+                    background: doctorMode[subject.id] === 'new' ? 'var(--clr-soft)' : 'var(--bg-soft)',
+                    color: doctorMode[subject.id] === 'new' ? 'var(--clr-primary)' : 'var(--fg-muted)',
+                    cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  + New Doctor
                 </button>
               </div>
+
+              {(doctorMode[subject.id] || 'select') === 'select' ? (
+                /* Select existing doctor */
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10 }}>
+                  <select
+                    className="adm-input"
+                    value={selectedDoctorId[subject.id] || ''}
+                    onChange={e => setSelectedDoctorId(p => ({ ...p, [subject.id]: e.target.value }))}
+                  >
+                    <option value="">Select a doctor...</option>
+                    {allDoctors
+                      .filter(d => !subject.subject_doctors.some(sd =>
+                        (Array.isArray(sd.doctor) ? sd.doctor[0]?.name : sd.doctor?.name) === d.name
+                        && sd.doctor_id === d.id
+                      ))
+                      .map(d => (
+                        <option key={d.id} value={d.id}>
+                          {d.name}{d.department ? ` — ${d.department}` : ''}
+                        </option>
+                      ))
+                    }
+                  </select>
+                  <button
+                    onClick={() => addDoctorToSubject(subject.id)}
+                    disabled={isLoading || !selectedDoctorId[subject.id]}
+                    className="adm-btn-ghost"
+                  >
+                    {isLoading ? <Loader2 width={14} height={14} className="animate-spin" /> : 'Add'}
+                  </button>
+                </div>
+              ) : (
+                /* Add new doctor */
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 10 }}>
+                  <input
+                    className="adm-input"
+                    placeholder="Doctor name (e.g. Dr. Ahmad)"
+                    value={newDoctorName[subject.id] || ''}
+                    onChange={e => setNewDoctorName(p => ({ ...p, [subject.id]: e.target.value }))}
+                  />
+                  <input
+                    className="adm-input"
+                    placeholder="Department (optional)"
+                    value={newDoctorDept[subject.id] || ''}
+                    onChange={e => setNewDoctorDept(p => ({ ...p, [subject.id]: e.target.value }))}
+                  />
+                  <button
+                    onClick={() => addDoctorToSubject(subject.id)}
+                    disabled={isLoading || !(newDoctorName[subject.id] || '').trim()}
+                    className="adm-btn-ghost"
+                  >
+                    {isLoading ? <Loader2 width={14} height={14} className="animate-spin" /> : 'Add'}
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Chapters & Lectures */}
