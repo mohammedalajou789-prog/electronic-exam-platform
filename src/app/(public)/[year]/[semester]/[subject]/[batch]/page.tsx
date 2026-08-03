@@ -1,169 +1,168 @@
-﻿// PAGE: Batch exams list (pre-clinical only)
-// URL:  /{year}/{semester}/{subject}/{batch}
-// PRE-CLINICAL: [batch] = batch slug → shows exams
-// CLINICAL: this route is never reached
+﻿// src/app/(public)/[year]/[semester]/[subject]/[batch]/page.tsx
+//
+// Pre-clinical → [batch] = batch slug → shows exam list
+// Clinical     → [batch] = examId (UUID) → shows Exam Prep
+
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
+import SharedExamPrepPage from '@/components/exam/shared/SharedExamPrepPage'
 
-interface PageProps {
-  params: Promise<{ year: string; semester: string; subject: string; batch: string }>
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function slugToName(s: string) {
+  return s.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')
+}
+function nameToSlug(s: string) {
+  return s.toLowerCase().replace(/\s+/g, '-')
 }
 
-function slugToName(slug: string): string {
-  return slug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-}
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
-export default async function BatchPage({ params }: PageProps) {
-  const { year, semester: semesterSlug, subject: subjectSlug, batch: batchSlug } = await params
+export default async function BatchPage({
+  params,
+}: {
+  params: Promise<{
+    year: string
+    semester: string
+    subject: string
+    batch: string
+  }>
+}) {
+  const { year: yearSlug, semester: semSlug, subject: subSlug, batch: batchSlug } = await params
   const supabase = await createServerSupabaseClient()
 
   const { data: academicYear } = await supabase
     .from('academic_years')
     .select('id, name, is_clinical')
-    .eq('name', slugToName(year))
+    .eq('name', slugToName(yearSlug))
     .single()
 
   if (!academicYear) notFound()
 
-  let subjectData: { id: string; name: string } | null = null
-  let batchData:   { id: string; name: string } | null = null
-  let breadcrumbSemesterLabel = ''
-  let breadcrumbSemesterHref  = `/${year}/${semesterSlug}`
-
-  if (academicYear!.is_clinical) {
-    // Clinical: semester=مادة، subject=دفعة، batch=exam_id (لن يصل هنا)
-    // في هذه الحالة: semester=مادة، subject=دفعة
+  // ── CLINICAL: batchSlug = examId ─────────────────────────────
+  if (academicYear.is_clinical && UUID_RE.test(batchSlug)) {
     const { data: allSubjects } = await supabase
       .from('subjects')
       .select('id, name')
       .eq('year_id', academicYear.id)
 
-    subjectData = allSubjects?.find(
-      s => s.name.toLowerCase().replace(/\s+/g, '-') === semesterSlug
-    ) ?? null
-    if (!subjectData) notFound()
+    const subject = allSubjects?.find(
+      (s: any) => nameToSlug(s.name) === subSlug
+    )
 
-    const { data: allBatches } = await supabase
-      .from('batches')
-      .select('id, name')
-      .eq('subject_id', subjectData.id)
+    const { data: allBatches } = subject
+      ? await supabase.from('batches').select('id, name').eq('subject_id', subject.id)
+      : { data: [] }
 
-    batchData = allBatches?.find(
-      b => b.name.toLowerCase().replace(/\s+/g, '-') === subjectSlug
-    ) ?? null
-    if (!batchData) notFound()
+    const batch = (allBatches || []).find(
+      (b: any) => nameToSlug(b.name) === semSlug
+    )
 
-    breadcrumbSemesterLabel = subjectData.name
-    breadcrumbSemesterHref  = `/${year}/${semesterSlug}`
-
-  } else {
-    // Pre-Clinical: semester=فصل، subject=مادة، batch=دفعة
-    const { data: semesterData } = await supabase
-      .from('semesters')
-      .select('id, name')
-      .eq('academic_year_id', academicYear.id)
-      .eq('name', slugToName(semesterSlug))
-      .single()
-
-    if (!semesterData) notFound()
-
-    const { data: allSubjects } = await supabase
-      .from('subjects')
-      .select('id, name')
-      .eq('semester_id', semesterData.id)
-
-    subjectData = allSubjects?.find(
-      s => s.name.toLowerCase().replace(/\s+/g, '-') === subjectSlug
-    ) ?? null
-    if (!subjectData) notFound()
-
-    const { data: allBatches } = await supabase
-      .from('batches')
-      .select('id, name')
-      .eq('subject_id', subjectData.id)
-
-    batchData = allBatches?.find(
-      b => b.name.toLowerCase().replace(/\s+/g, '-') === batchSlug
-    ) ?? null
-    if (!batchData) notFound()
-
-    breadcrumbSemesterLabel = semesterData.name
-    breadcrumbSemesterHref  = `/${year}/${semesterSlug}`
+    return (
+      <SharedExamPrepPage
+        examId={batchSlug}
+        basePath={`/${yearSlug}/${subSlug}/${semSlug}/${batchSlug}`}
+        breadcrumbs={[
+          { label: 'Home', href: '/' },
+          { label: academicYear.name, href: `/${yearSlug}` },
+          { label: subject?.name || subSlug, href: `/${yearSlug}/${subSlug}` },
+          { label: batch?.name || semSlug, href: `/${yearSlug}/${subSlug}/${semSlug}` },
+          { label: 'Exam' },
+        ]}
+      />
+    )
   }
 
-  // الـ exam_id في المسار مختلف بين Clinical و Pre-Clinical
-  const actualBatchId = batchData!.id
+  // ── PRE-CLINICAL: show exam list ──────────────────────────────
+  const { data: semesterData } = await supabase
+    .from('semesters')
+    .select('id, name')
+    .eq('academic_year_id', academicYear.id)
+    .eq('name', slugToName(semSlug))
+    .single()
+
+  if (!semesterData) notFound()
+
+  const { data: allSubjects } = await supabase
+    .from('subjects')
+    .select('id, name')
+    .eq('semester_id', semesterData.id)
+
+  const subject = allSubjects?.find(
+    (s: any) => nameToSlug(s.name) === subSlug
+  )
+  if (!subject) notFound()
+
+  const { data: allBatches } = await supabase
+    .from('batches')
+    .select('id, name')
+    .eq('subject_id', subject.id)
+
+  const batch = allBatches?.find(
+    (b: any) => nameToSlug(b.name) === batchSlug
+  )
+  if (!batch) notFound()
 
   const { data: exams } = await supabase
     .from('exams')
     .select('*, exam_doctors(doctor:doctors(name))')
-    .eq('batch_id', actualBatchId)
+    .eq('batch_id', batch.id)
     .eq('status', 'published')
     .is('deleted_at', null)
     .order('created_at', { ascending: false })
 
   const examList = exams || []
-
-  // رابط الامتحان يختلف بين Clinical و Pre-Clinical
-  function examHref(examId: string): string {
-    if (academicYear!.is_clinical) {
-      return `/${year}/${semesterSlug}/${subjectSlug}/${batchSlug}/${examId}`
-    }
-    return `/${year}/${semesterSlug}/${subjectSlug}/${batchSlug}/${examId}`
-  }
+  const basePath = `/${yearSlug}/${semSlug}/${subSlug}/${batchSlug}`
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)', fontFamily: '"Plus Jakarta Sans", system-ui, sans-serif' }}>
-      <main style={{ padding: '32px 0 80px' }}>
+      <main style={{ padding: '32px 28px 80px' }}>
 
         {/* Breadcrumb */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', fontSize: 13, color: 'var(--fg-muted)', marginBottom: 18 }}>
           <Link href="/" style={{ color: 'var(--fg-muted)', textDecoration: 'none' }}>Home</Link>
           <span>›</span>
-          <Link href={`/${year}`} style={{ color: 'var(--fg-muted)', textDecoration: 'none' }}>{academicYear.name}</Link>
+          <Link href={`/${yearSlug}`} style={{ color: 'var(--fg-muted)', textDecoration: 'none' }}>{academicYear.name}</Link>
           <span>›</span>
-          <Link href={breadcrumbSemesterHref} style={{ color: 'var(--fg-muted)', textDecoration: 'none' }}>{breadcrumbSemesterLabel}</Link>
-          {!academicYear.is_clinical && (
-            <>
-              <span>›</span>
-              <Link href={`/${year}/${semesterSlug}/${subjectSlug}`} style={{ color: 'var(--fg-muted)', textDecoration: 'none' }}>{subjectData!.name}</Link>
-            </>
-          )}
+          <Link href={`/${yearSlug}/${semSlug}`} style={{ color: 'var(--fg-muted)', textDecoration: 'none' }}>{semesterData.name}</Link>
           <span>›</span>
-          <span style={{ color: 'var(--fg)', fontWeight: 700 }}>{batchData!.name}</span>
+          <Link href={`/${yearSlug}/${semSlug}/${subSlug}`} style={{ color: 'var(--fg-muted)', textDecoration: 'none' }}>{subject.name}</Link>
+          <span>›</span>
+          <span style={{ color: 'var(--fg)', fontWeight: 700 }}>{batch.name}</span>
         </div>
 
-        {/* Header */}
-        <h1 style={{ margin: '0 0 4px', fontSize: 26, fontWeight: 800, color: 'var(--fg)' }}>
-          {batchData!.name}
-        </h1>
+        <h1 style={{ margin: '0 0 4px', fontSize: 26, fontWeight: 800 }}>{batch.name}</h1>
         <p style={{ margin: '0 0 28px', fontSize: 14.5, color: 'var(--fg-muted)' }}>
-          {subjectData!.name} — {examList.length} exam{examList.length !== 1 ? 's' : ''} available
+          {subject.name} — {examList.length} exam{examList.length !== 1 ? 's' : ''} available
         </p>
 
-        {/* Exams */}
         {examList.length > 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {examList.map((exam, index) => {
+            {examList.map((exam: any, index: number) => {
               const doctors = exam.exam_doctors
-                ?.map((ed: { doctor?: { name: string } }) => ed.doctor?.name)
+                ?.map((ed: any) => ed.doctor?.name)
                 .filter(Boolean) || []
 
               return (
                 <div
                   key={exam.id}
-                  style={{ opacity: 0, animation: `0.5s ease-out ${index * 70}ms 1 normal forwards running fadeInUp`, background: 'var(--bg-elev)', border: '1px solid var(--bd)', borderRadius: 16, padding: 22, display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}
+                  style={{
+                    opacity: 0,
+                    animation: `0.5s ease-out ${index * 70}ms 1 normal forwards running fadeInUp`,
+                    background: 'var(--bg-elev)', border: '1px solid var(--bd)',
+                    borderRadius: 16, padding: 22,
+                    display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap',
+                  }}
                 >
                   <div style={{ width: 46, height: 46, borderRadius: 13, background: 'var(--clr-soft)', color: 'var(--clr-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                       <polyline points="14 2 14 8 20 8" />
-                      <line x1="16" y1="13" x2="8" y2="13" />
-                      <line x1="16" y1="17" x2="8" y2="17" />
+                      <line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" />
                     </svg>
                   </div>
-
                   <div style={{ flex: '1 1 0%', minWidth: 200 }}>
                     <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--fg)', marginBottom: 4 }}>{exam.title}</div>
                     {exam.exam_type && (
@@ -182,21 +181,18 @@ export default async function BatchPage({ params }: PageProps) {
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /></svg>
                         {exam.question_count} questions
                       </span>
-                      {exam.question_count > 0 && (
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                          {exam.question_count} min
-                        </span>
-                      )}
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                        ~{exam.question_count} min
+                      </span>
                     </div>
                   </div>
-
                   <Link
-                    href={examHref(exam.id)}
+                    href={`${basePath}/${exam.id}`}
                     style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 22px', borderRadius: 12, background: 'var(--clr-primary)', color: '#fff', fontSize: 14, fontWeight: 700, textDecoration: 'none', flexShrink: 0 }}
                   >
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3" /></svg>
-                    Start Exam
+                    View Exam
                   </Link>
                 </div>
               )
@@ -204,11 +200,8 @@ export default async function BatchPage({ params }: PageProps) {
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', borderRadius: 18, border: '1px dashed var(--bd)', padding: '64px 24px', textAlign: 'center' }}>
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--fg-muted)" strokeWidth="1.5" style={{ marginBottom: 16, opacity: 0.5 }}>
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
-            </svg>
-            <h3 style={{ margin: '0 0 8px', fontSize: 17, fontWeight: 700, color: 'var(--fg)' }}>No exams available</h3>
-            <p style={{ margin: 0, fontSize: 14, color: 'var(--fg-muted)' }}>Exams will appear here once they are published by an administrator.</p>
+            <h3 style={{ margin: '0 0 8px', fontSize: 17, fontWeight: 700 }}>No exams available</h3>
+            <p style={{ margin: 0, fontSize: 14, color: 'var(--fg-muted)' }}>Exams will appear here once published by an administrator.</p>
           </div>
         )}
       </main>

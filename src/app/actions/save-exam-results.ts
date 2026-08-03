@@ -1,6 +1,7 @@
 'use server'
 
 import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { computeStudyTip } from '@/app/actions/compute-study-tip'
 
 export interface QuestionResult {
   questionId: string
@@ -132,12 +133,17 @@ export async function saveExamResults(
         console.error('Failed to update user stats:', statsError)
       }
 
-      // 2e. Delete study_progress — exam is fully completed
+
       await supabase
         .from('study_progress')
         .delete()
         .eq('user_id', user.id)
         .eq('exam_id', input.examId)
+
+      // 2f. Compute study tip (fire-and-forget — never blocks the result)
+      computeStudyTip(user.id, input.examId).catch(err =>
+        console.error('computeStudyTip failed:', err)
+      )
     }
   }
 

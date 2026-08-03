@@ -280,12 +280,22 @@ export default function InteractiveExam({
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const autoSaveRef = useRef<NodeJS.Timeout | null>(null)
   const modeRef = useRef<Mode>('play')
+  // Cached user id — loaded once on mount so we can use it in beforeunload
+  // (beforeunload cannot await async calls reliably)
+  const userIdRef = useRef<string | null>(null)
 
   // Keep refs in sync with state
   useEffect(() => { answersRef.current = answers }, [answers])
   useEffect(() => { flaggedRef.current = flagged }, [flagged])
   useEffect(() => { currentRef.current = current }, [current])
   useEffect(() => { modeRef.current = mode }, [mode])
+
+  // ── Cache user id on mount (needed for beforeunload beacon) ──────────────
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      userIdRef.current = user?.id ?? null
+    })
+  }, [supabase])
 
   // ── Dark mode observer ────────────────────────────────────────────────────
   useEffect(() => {
@@ -339,6 +349,58 @@ export default function InteractiveExam({
     }
   }, [persistProgress])
 
+  // ── Save on browser close / tab close / refresh ───────────────────────────
+  // beforeunload fires synchronously — we cannot await inside it.
+  // We use sendBeacon (fire-and-forget) so the POST completes after the page unloads.
+  // The user_id was cached on mount in userIdRef so we can use it here without async.
+  useEffect(() => {
+    function handleBeforeUnload() {
+      // Only save if we are still in play mode (not after finish)
+      if (modeRef.current !== 'play') return
+      if (!userIdRef.current) return
+
+      const payload = JSON.stringify({
+        user_id: userIdRef.current,
+        exam_id: exam.id,
+        current_question: currentRef.current,
+        answers_json: answersRef.current,
+        flags_json: Object.keys(flaggedRef.current).filter(id => flaggedRef.current[id]),
+        remaining_time: secondsRef.current,
+        completed: false,
+      })
+      // sendBeacon survives page unload; the /api/save-progress route uses
+      // the service-role key to write to Supabase without cookies
+      navigator.sendBeacon('/api/save-progress', new Blob([payload], { type: 'application/json' }))
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [exam.id])
+
+  // ── Save on browser Back button ───────────────────────────────────────────
+  // popstate fires when the user presses the browser Back/Forward button.
+  // We use sendBeacon here too (same reason as beforeunload — navigation is happening).
+  useEffect(() => {
+    function handlePopState() {
+      if (modeRef.current !== 'play') return
+      if (!userIdRef.current) return
+
+      const payload = JSON.stringify({
+        user_id: userIdRef.current,
+        exam_id: exam.id,
+        current_question: currentRef.current,
+        answers_json: answersRef.current,
+        flags_json: Object.keys(flaggedRef.current).filter(id => flaggedRef.current[id]),
+        remaining_time: secondsRef.current,
+        completed: false,
+      })
+      navigator.sendBeacon('/api/save-progress', new Blob([payload], { type: 'application/json' }))
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [exam.id])
+
   // ── "Continue Later" ──────────────────────────────────────────────────────
   /**
    * Saves the full current state to study_progress, then navigates back.
@@ -365,7 +427,7 @@ export default function InteractiveExam({
       )
     }
 
-    router.push(prepPath)
+    window.location.replace(prepPath)
   }
 
   // ── Finish exam ───────────────────────────────────────────────────────────
@@ -1981,7 +2043,7 @@ export default function InteractiveExam({
                 fontSize: 14,
                 cursor: 'pointer',
               }}
-              onClick={() => router.push(prepPath)}
+              onClick={() => window.location.replace(prepPath)}
             >
               Exit
             </button>

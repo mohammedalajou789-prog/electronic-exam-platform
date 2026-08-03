@@ -3,6 +3,6 @@ import { useParams } from 'next/navigation'
 import SharedPdfPage from '@/components/exam/shared/SharedPdfPage'
 
 export default function Page() {
-  const { examId } = useParams() as { examId: string }
+  const { batch: examId } = useParams() as { batch: string }
   return <SharedPdfPage examId={examId} />
 }
