@@ -1,7 +1,6 @@
 ﻿'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
 
 interface Props {
   batches: string[]
@@ -16,8 +15,6 @@ const roleMeta: Record<Role, { label: string; icon: string }> = {
 }
 
 export default function AddAdminForm({ batches }: Props) {
-  const supabase = createClient()
-
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -27,7 +24,6 @@ export default function AddAdminForm({ batches }: Props) {
   const [showPassword, setShowPassword] = useState(false)
   const [role, setRole] = useState<Role>('admin')
   const [loading, setLoading] = useState(false)
-  const [successMsg, setSuccessMsg] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
 
   const disabled = !name.trim() || !email.trim() || !password.trim() || loading
@@ -36,22 +32,32 @@ export default function AddAdminForm({ batches }: Props) {
     if (disabled) return
     setLoading(true)
     setErrorMsg('')
-    setSuccessMsg('')
+
     try {
-      // Create user via Supabase Admin API (service role needed — call server action or API route)
       const res = await fetch('/api/admin/create-admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), email: email.trim(), phone: phone.trim(), batch, password, role }),
+        body: JSON.stringify({
+          display_name: name.trim(),
+          email: email.trim(),
+          phone: phone.trim(),
+          batch,
+          password,
+          role,
+        }),
       })
+
       const json = await res.json()
-      if (!res.ok) throw new Error(json.error || 'Failed to create admin')
-      setSuccessMsg(`Admin "${name.trim()}" created successfully.`)
-      setName(''); setEmail(''); setPhone(''); setBatch(''); setPassword(''); setRole('admin')
-      setOpen(false)
+
+      if (!res.ok) {
+        throw new Error(json.error || 'Failed to create admin')
+      }
+
+      // Success — reload to show the new admin in the list
+      window.location.reload()
+
     } catch (err: any) {
       setErrorMsg(err.message || 'An error occurred.')
-    } finally {
       setLoading(false)
     }
   }
@@ -101,7 +107,6 @@ export default function AddAdminForm({ batches }: Props) {
     .aaf-btn-primary:disabled { opacity:0.5; cursor:not-allowed; transform:none; }
     .aaf-btn-ghost { background:var(--aaf-soft); color:var(--aaf-fg); border:1px solid var(--aaf-bd); border-radius:11px; padding:10px 18px; font-size:13.5px; font-weight:700; cursor:pointer; font-family:inherit; transition:background 0.15s; }
     .aaf-btn-ghost:hover { background:var(--aaf-bd); }
-    .aaf-success { padding:10px 14px; border-radius:10px; background:#dcfce7; color:#15803d; font-size:13px; font-weight:600; margin-top:12px; }
     .aaf-error { padding:10px 14px; border-radius:10px; background:#fee2e2; color:#b91c1c; font-size:13px; font-weight:600; margin-top:12px; }
     @media (max-width:600px) {
       .aaf-grid { grid-template-columns:1fr !important; }
@@ -147,19 +152,35 @@ export default function AddAdminForm({ batches }: Props) {
               {/* Display Name */}
               <label>
                 <div className="aaf-label">Display Name</div>
-                <input className="aaf-input" placeholder="e.g. Ahmad Al-Hassan" value={name} onChange={e => setName(e.target.value)} />
+                <input
+                  className="aaf-input"
+                  placeholder="e.g. Ahmad Al-Hassan"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                />
               </label>
 
               {/* Email */}
               <label>
                 <div className="aaf-label">Email</div>
-                <input className="aaf-input" type="email" placeholder="e.g. ahmad@gmail.com" value={email} onChange={e => setEmail(e.target.value)} />
+                <input
+                  className="aaf-input"
+                  type="email"
+                  placeholder="e.g. ahmad@gmail.com"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                />
               </label>
 
               {/* Phone */}
               <label>
                 <div className="aaf-label">Phone Number</div>
-                <input className="aaf-input" placeholder="e.g. 0791234567" value={phone} onChange={e => setPhone(e.target.value)} />
+                <input
+                  className="aaf-input"
+                  placeholder="e.g. 0791234567"
+                  value={phone}
+                  onChange={e => setPhone(e.target.value)}
+                />
               </label>
 
               {/* Batch */}
@@ -206,7 +227,8 @@ export default function AddAdminForm({ batches }: Props) {
                     >
                       <svg width="14" height="14" viewBox="0 0 24 24"
                         fill={r === 'super_admin' ? 'currentColor' : 'none'}
-                        stroke="currentColor" strokeWidth={r === 'super_admin' ? '1' : '2'}
+                        stroke="currentColor"
+                        strokeWidth={r === 'super_admin' ? '1' : '2'}
                         strokeLinecap="round" strokeLinejoin="round">
                         <path d={roleMeta[r].icon}/>
                       </svg>
@@ -230,9 +252,8 @@ export default function AddAdminForm({ batches }: Props) {
               </div>
             )}
 
-            {/* Success / Error */}
-            {successMsg && <div className="aaf-success">{successMsg}</div>}
-            {errorMsg   && <div className="aaf-error">{errorMsg}</div>}
+            {/* Error message */}
+            {errorMsg && <div className="aaf-error">{errorMsg}</div>}
 
             {/* Actions */}
             <div className="aaf-actions">
