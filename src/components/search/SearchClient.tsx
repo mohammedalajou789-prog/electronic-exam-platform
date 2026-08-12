@@ -8,6 +8,7 @@ import SearchResults from '@/components/search/SearchResults'
 interface Suggestion {
   type: string
   label: string
+  display?: string
   icon: string
 }
 
@@ -136,9 +137,7 @@ export default function SearchClient({
     const terms = query.split('+').map(t => t.trim()).filter(Boolean)
 
     // For questions, use only the first 3 words to avoid matching issues with truncated text
-    const searchLabel = suggestion.type === 'question'
-      ? suggestion.label.replace(/[…\.]+$/, '').trim().split(/\s+/).slice(0, 5).join(' ')
-      : suggestion.label
+    const searchLabel = suggestion.label
 
     terms[terms.length - 1] = searchLabel
     const newQuery = terms.join(' + ')
@@ -287,7 +286,7 @@ export default function SearchClient({
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 >
                   <span style={{ fontSize: 15, flexShrink: 0 }}>{s.icon}</span>
-                  <span style={{ fontSize: 13.5, color: 'var(--fg)', fontWeight: 500 }}>{s.label}</span>
+                  <span style={{ fontSize: 13.5, color: 'var(--fg)', fontWeight: 500 }}>{s.display ?? s.label}</span>
                   <span style={{
                     marginLeft: 'auto', fontSize: 11, fontWeight: 700, padding: '2px 8px',
                     borderRadius: 999, background: 'var(--bg-soft)', color: 'var(--fg-muted)',
