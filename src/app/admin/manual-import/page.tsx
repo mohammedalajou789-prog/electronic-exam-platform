@@ -205,8 +205,12 @@ export default function ManualImportPage() {
       }
     }
     setIsSaving(true)
-    const { data: existingExam } = await supabase.from('exams').select('question_count').eq('id', selectedExam).single()
-    let orderStart = (existingExam?.question_count || 0) + 1
+    const { count: existingCount } = await supabase
+      .from('questions')
+      .select('id', { count: 'exact', head: true })
+      .eq('exam_id', selectedExam)
+      .is('deleted_at', null)
+    let orderStart = (existingCount || 0) + 1
     let saved = 0
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i]
@@ -232,7 +236,7 @@ export default function ManualImportPage() {
       if (q.doctor_id) await supabase.from('exam_doctors').upsert({ exam_id: selectedExam, doctor_id: q.doctor_id })
       if (q.images.length > 0) await uploadImages(inserted.id, q.images)
     }
-    await supabase.from('exams').update({ question_count: (existingExam?.question_count || 0) + saved }).eq('id', selectedExam)
+    await supabase.from('exams').update({ question_count: (existingCount || 0) + saved }).eq('id', selectedExam)
     setSavedCount(saved)
     setIsDone(true)
     setIsSaving(false)
