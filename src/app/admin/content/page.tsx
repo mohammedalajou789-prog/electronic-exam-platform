@@ -283,8 +283,33 @@ export default function ContentManagementPage() {
   }
 
   async function deleteSubject(id: string) {
-    if (!confirm('Delete this subject and all its data (batches, chapters, exams)?')) return
-    await supabase.from('subjects').delete().eq('id', id)
+    const { data: subjectBatches } = await supabase
+      .from('batches')
+      .select('id')
+      .eq('subject_id', id)
+    const batchIds = (subjectBatches || []).map(b => b.id)
+
+    let examCount = 0
+    if (batchIds.length > 0) {
+      const { count } = await supabase
+        .from('exams')
+        .select('id', { count: 'exact', head: true })
+        .in('batch_id', batchIds)
+        .is('deleted_at', null)
+      examCount = count ?? 0
+    }
+
+    if (batchIds.length > 0) {
+      showToast(
+        `Cannot delete: this subject has ${batchIds.length} batch(es)${examCount > 0 ? ` and ${examCount} exam(s)` : ''}. Delete them first.`,
+        'error'
+      )
+      return
+    }
+
+    if (!confirm('Delete this subject and all its data (chapters, lectures, doctors)?')) return
+    const { error } = await supabase.from('subjects').delete().eq('id', id)
+    if (error) { showToast(error.message, 'error'); return }
     await loadAll(); showToast('Subject deleted')
   }
 
@@ -320,7 +345,28 @@ export default function ContentManagementPage() {
   }
 
   async function removeDoctorFromSubject(subjectDoctorId: string) {
-    await supabase.from('subject_doctors').delete().eq('id', subjectDoctorId)
+    const subject = subjects.find(s => s.subject_doctors.some(sd => sd.id === subjectDoctorId))
+    const link = subject?.subject_doctors.find(sd => sd.id === subjectDoctorId)
+    if (!subject || !link) return
+
+    const batchIds = subject.batches.map(b => b.id)
+    const examIds = exams.filter(e => batchIds.includes(e.batch_id)).map(e => e.id)
+
+    let usedCount = 0
+    if (examIds.length > 0) {
+      const [{ count: directCount }, { count: linkCount }] = await Promise.all([
+        supabase.from('exams').select('id', { count: 'exact', head: true }).in('id', examIds).eq('doctor_id', link.doctor_id),
+        supabase.from('exam_doctors').select('id', { count: 'exact', head: true }).in('exam_id', examIds).eq('doctor_id', link.doctor_id),
+      ])
+      usedCount = (directCount || 0) + (linkCount || 0)
+    }
+    if (usedCount > 0) {
+      showToast(`Cannot remove: this doctor is assigned to ${usedCount} exam(s) in this subject.`, 'error')
+      return
+    }
+
+    const { error } = await supabase.from('subject_doctors').delete().eq('id', subjectDoctorId)
+    if (error) { showToast(error.message, 'error'); return }
     await loadAll(); showToast('Doctor removed')
   }
 
@@ -338,8 +384,31 @@ export default function ContentManagementPage() {
   }
 
   async function deleteChapter(chapterId: string) {
+    const subject = subjects.find(s => s.chapters.some(c => c.id === chapterId))
+    const chapter = subject?.chapters.find(c => c.id === chapterId)
+    if (!subject || !chapter) return
+
+    const batchIds = subject.batches.map(b => b.id)
+    const examIds = exams.filter(e => batchIds.includes(e.batch_id)).map(e => e.id)
+
+    let usedCount = 0
+    if (examIds.length > 0) {
+      const { count } = await supabase
+        .from('questions')
+        .select('id', { count: 'exact', head: true })
+        .in('exam_id', examIds)
+        .eq('chapter', chapter.name)
+        .is('deleted_at', null)
+      usedCount = count || 0
+    }
+    if (usedCount > 0) {
+      showToast(`Cannot delete: ${usedCount} question(s) are tagged with this chapter.`, 'error')
+      return
+    }
+
     if (!confirm('Delete this chapter and all its lectures?')) return
-    await supabase.from('chapters').delete().eq('id', chapterId)
+    const { error } = await supabase.from('chapters').delete().eq('id', chapterId)
+    if (error) { showToast(error.message, 'error'); return }
     await loadAll(); showToast('Chapter deleted')
   }
 
@@ -359,7 +428,32 @@ export default function ContentManagementPage() {
   }
 
   async function deleteLecture(lectureId: string) {
-    await supabase.from('lectures').delete().eq('id', lectureId)
+    const subject = subjects.find(s => s.chapters.some(c => c.lectures.some(l => l.id === lectureId)))
+    const chapter = subject?.chapters.find(c => c.lectures.some(l => l.id === lectureId))
+    const lecture = chapter?.lectures.find(l => l.id === lectureId)
+    if (!subject || !lecture) return
+
+    const batchIds = subject.batches.map(b => b.id)
+    const examIds = exams.filter(e => batchIds.includes(e.batch_id)).map(e => e.id)
+
+    let usedCount = 0
+    if (examIds.length > 0) {
+      const { count } = await supabase
+        .from('questions')
+        .select('id', { count: 'exact', head: true })
+        .in('exam_id', examIds)
+        .eq('lecture', lecture.name)
+        .is('deleted_at', null)
+      usedCount = count || 0
+    }
+    if (usedCount > 0) {
+      showToast(`Cannot delete: ${usedCount} question(s) are tagged with this lecture.`, 'error')
+      return
+    }
+
+    if (!confirm('Delete this lecture?')) return
+    const { error } = await supabase.from('lectures').delete().eq('id', lectureId)
+    if (error) { showToast(error.message, 'error'); return }
     await loadAll(); showToast('Lecture deleted')
   }
 
@@ -377,12 +471,13 @@ export default function ContentManagementPage() {
 
   async function deleteBatch(id: string) {
     if (!confirm('Delete this batch?')) return
-    await supabase.from('batches').delete().eq('id', id)
+    const { error } = await supabase.from('batches').delete().eq('id', id)
+    if (error) { showToast(error.message, 'error'); return }
     await loadAll(); showToast('Batch deleted')
   }
 
   async function createExam() {
-    if (!newExamSubjectId || !newExamBatchId || !newExamTitle.trim()) return
+    if (!newExamYear || !newExamSubjectId || !newExamBatchId || !newExamTitle.trim()) return
     setIsLoading(true)
     const { data: examData, error } = await supabase.from('exams').insert({
       batch_id: newExamBatchId,
@@ -390,7 +485,7 @@ export default function ContentManagementPage() {
       calendar_year: parseInt(newExamCalendarYear) || new Date().getFullYear(),
       exam_type: newExamType,
       status: newExamStatus,
-      
+      academic_year_id: newExamYear,
       question_count: 0,
     } as any).select('id').single()
     if (error) { showToast(error.message, 'error'); setIsLoading(false); return }
@@ -1670,7 +1765,7 @@ export default function ContentManagementPage() {
               <button onClick={() => setShowExamModal(false)} className="adm-btn-ghost">Cancel</button>
               <button
                 onClick={createExam}
-                disabled={isLoading || !newExamSubjectId || !newExamBatchId || !newExamTitle.trim()}
+                disabled={isLoading || !newExamYear || !newExamSubjectId || !newExamBatchId || !newExamTitle.trim()}
                 className="adm-btn-primary"
               >
                 {isLoading ? <Loader2 width={15} height={15} className="animate-spin" /> : null}

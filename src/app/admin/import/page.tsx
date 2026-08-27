@@ -81,7 +81,7 @@ const [pendingLectureNums, setPendingLectureNums] = useState<{ name: string; num
     async function load() {
       const [{ data: ex }, { data: ba }, { data: su }, { data: do_ }, { data: ch }, { data: le }, { data: yr }, { data: sm }] =
         await Promise.all([
-          supabase.from('exams').select('id, title, batch_id').eq('status', 'published').is('deleted_at', null).order('title'),
+          supabase.from('exams').select('id, title, batch_id').neq('status', 'archived').is('deleted_at', null).order('title'),
           supabase.from('batches').select('*'),
           supabase.from('subjects').select('id, name, semester_id, year_id'),
           supabase.from('doctors').select('*').order('name'),
@@ -122,12 +122,13 @@ const [pendingLectureNums, setPendingLectureNums] = useState<{ name: string; num
         name: l.name,
         chapterName: allChapters.find(c => c.id === l.chapter_id)?.name || ''
       }))
-    const { data: subjectDoctorsData } = await supabase
-      .from('subject_doctors')
+    // Doctors linked to THIS EXAM specifically — not every doctor in the subject
+    const { data: examDoctorsData } = await supabase
+      .from('exam_doctors')
       .select('doctor:doctors(id, name)')
-      .eq('subject_id', subjectId)
-    const subjectDoctorNames = (subjectDoctorsData || []).map((sd: any) => Array.isArray(sd.doctor) ? sd.doctor[0]?.name : sd.doctor?.name).filter(Boolean)
-    setExamInfo({ subjectId, chapters: subjectChapters, lectures: subjectLectures, lecturesWithChapter, doctors: subjectDoctorNames })
+      .eq('exam_id', examId)
+    const examDoctorNames = (examDoctorsData || []).map((ed: any) => Array.isArray(ed.doctor) ? ed.doctor[0]?.name : ed.doctor?.name).filter(Boolean)
+    setExamInfo({ subjectId, chapters: subjectChapters, lectures: subjectLectures, lecturesWithChapter, doctors: examDoctorNames })
     if (subjectName) setExpandedSubject(subjectName)
   }
 
@@ -335,8 +336,11 @@ __text__        Underline
     let doctorInstruction = ''
     let doctorRule = ''
 
-    if (!isMultipleDoctors) {
-      const singleDoc = examInfo.doctors[0] || 'N/A'
+    if (examInfo.doctors.length === 0) {
+      doctorInstruction = `This exam has no doctors assigned. Do NOT add a "Doctor:" line to any question — omit the Doctor field completely.`
+      doctorRule = `8. This exam has no assigned doctors — do not include a "Doctor:" field in any question.`
+    } else if (!isMultipleDoctors) {
+      const singleDoc = examInfo.doctors[0]
       doctorInstruction = `All questions are taught by: ${singleDoc}
 Add this line to every question: Doctor: ${singleDoc}`
       doctorRule = `8. Every question must include: Doctor: ${singleDoc}`
@@ -370,7 +374,7 @@ ${unassignedNote}`
 
     const prompt = `You are a medical education assistant helping format exam questions for the Electronic Exam Platform.
 
-Convert every question I provide into the exact format below without changing meaning, content, or correct answers.
+Convert every question I provide into the exact format below. If a question is already complete, preserve its meaning, content, and correct answer exactly — just reformat it. If a question is incomplete or rough (see QUESTION COMPLETENESS rule below), complete it properly rather than reproducing it as-is.
 
 ════════════════════════════════════════
 OUTPUT FORMAT (reproduce exactly):
@@ -417,12 +421,13 @@ Enrich every explanation using these formatting tokens:
   ~~text~~       → Green text — use for correct mechanisms or positive findings
   ::text::       → Blue text — use for pathophysiology keywords
   __text__       → Underline
-  [Image Slot 1] → Image placeholder — use when a clinical image would help (max 3)
   [TABLE]
   | Column 1 | Column 2 |
   |----------|----------|
   | Value 1  | Value 2  |
   [/TABLE]       → Table — use for comparisons, criteria, or classifications
+
+DO NOT use [Image Slot 1], [Image Slot 2], [Image Slot 3], or any image placeholder inside the Explanation field. Explanations must be text-only (with the formatting tokens above) — never insert an image placeholder yourself.
 
 IMPORTANT — Explanation quality: Every explanation must be thorough and detailed, not just one or two lines. Cover the mechanism, why the correct answer is right, relevant clinical context, and key facts a student needs to remember. Use at least **bold** and ==highlight== in every explanation. Add !!callout!! for high-yield clinical pearls.
 
@@ -432,16 +437,25 @@ RULES:
 
 1. Mark the correct answer with * after a space at the end of that choice line
 2. Use EXACT chapter and lecture names — spelling must match the list above perfectly
-3. Every question requires: question text, choices A–D, correct answer marked with *, chapter, lecture, explanation
+3. Every question requires: question text, at least 4 choices (A–D), correct answer marked with *, chapter, lecture, explanation
 4. The Doctor field is required only when a doctor is assigned to that lecture (see DOCTORS section above)
 5. Choice E is optional
 6. Wrong answer explanations are optional but strongly recommended
 7. Output the formatted questions first, then append the END OF REPORT section below
 8. Number questions sequentially starting from 1
 ${doctorRule}
-9. If a question does not clearly belong to any chapter or lecture in the list above, assign the most appropriate chapter and lecture name, even if it requires creating a new one. At the end of the report, list all newly added chapters/lectures under "NEW TOPICS ADDED".
-10. If you notice any errors or inconsistencies in the original questions (wrong answer, contradictory choices, unclear phrasing, etc.), list them under "QUESTION NOTES" in the end report.
-11. If any question appears to require a clinical image, X-ray, ECG, histology slide, or any visual to be answered correctly, list those question numbers under "QUESTIONS REQUIRING IMAGES" in the end report.
+9. TOPIC ASSIGNMENT — read carefully, do not skip:
+   a. ALWAYS prefer an EXISTING chapter from the list above. Only create a brand-new chapter when the topic genuinely does not belong under any existing chapter (a new chapter means a whole new subject area — not a specific disease, condition, or subtopic).
+   b. If the topic is a specific disease/condition/subtopic that logically fits inside an existing chapter (example: "Congenital Heart Disease" belongs as a LECTURE under an existing "Cardiology" chapter — it is NOT its own chapter), you must use that existing chapter and, if needed, add a new LECTURE under it. Do not invent a new chapter for something that is really lecture-level.
+   c. Do not force-fit a question into an existing lecture that does not actually match, just to avoid creating a new one. If no existing lecture under the correct chapter fits, create one — using the full, correctly spelled standard medical name (e.g. "Congenital Heart Disease", never a shortened/misspelled form like "Congenital Heat Dis").
+   d. List every new chapter or lecture you created under "NEW TOPICS ADDED" in the end report, each with a one-line reason why no existing topic fit.
+10. QUESTION COMPLETENESS — the questions I paste may be complete and ready, OR incomplete/rough (missing choices, partial ideas, sloppy formatting). Handle each accordingly:
+   a. If a question is already complete and well-formed, keep its meaning, wording, and choices as given — just reformat it into the OUTPUT FORMAT above.
+   b. If a question is incomplete (fewer than 4 choices, a missing correct answer, unclear phrasing, or clearly just a rough idea), you must complete it into a full, correct, exam-ready question with a minimum of 4 plausible choices (A–D), medically accurate and at the same difficulty level as the rest. Note every question you completed/modified this way under "QUESTION NOTES", explaining what was missing and what you added.
+11. If you notice any errors or inconsistencies in an already-complete original question (wrong answer, contradictory choices, unclear phrasing, etc.), list them under "QUESTION NOTES" in the end report.
+12. IMAGES — you must never decide to add an image yourself. Only identify and report:
+   a. If a question's TEXT depends on an image, X-ray, ECG, histology slide, or any visual to be answered correctly, list those question numbers under "QUESTIONS REQUIRING IMAGES" in the end report — do not insert any image placeholder into the question text.
+   b. Never use an image placeholder inside the Explanation field (see EXPLANATION FORMATTING above).
 
 ════════════════════════════════════════
 END OF REPORT FORMAT (append after all questions):

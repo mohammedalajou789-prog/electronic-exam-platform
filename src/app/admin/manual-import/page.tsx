@@ -89,7 +89,7 @@ export default function ManualImportPage() {
     async function load() {
       const [{ data: ex }, { data: ba }, { data: su }, { data: do_ }, { data: ch }, { data: le }, { data: yr }, { data: sm }] =
         await Promise.all([
-          supabase.from('exams').select('id, title, batch_id').eq('status', 'published').is('deleted_at', null).order('title'),
+          supabase.from('exams').select('id, title, batch_id').neq('status', 'archived').is('deleted_at', null).order('title'),
           supabase.from('batches').select('*'),
           supabase.from('subjects').select('id, name, semester_id, year_id'),
           supabase.from('doctors').select('*').order('name'),
@@ -587,7 +587,7 @@ export default function ManualImportPage() {
                     <select className="mi-input" value={q.doctor_id} onChange={e => updateQuestion(qIndex, 'doctor_id', e.target.value)} disabled={!selectedExam}>
                       <option value="">{selectedExam ? 'No doctor' : 'Select an exam first'}</option>
                       {doctors
-                        .filter(d => examDoctorIds.length === 0 || examDoctorIds.includes(d.id))
+                        .filter(d => examDoctorIds.includes(d.id))
                         .map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                     </select>
                   </div>

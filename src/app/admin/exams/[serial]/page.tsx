@@ -31,9 +31,12 @@ interface Exam {
   calendar_year: number | null
   status: string
   question_count: number
-  batch: { name: string; subject: { name: string } | null } | null
+  batch: { name: string; subject: { id: string; name: string } | null } | null
   doctor: { name: string } | null
 }
+
+interface Chapter { id: string; name: string }
+interface Lecture { id: string; name: string; chapter_id: string }
 
 const LETTERS = ['a', 'b', 'c', 'd', 'e'] as const
 const LABEL: Record<string, string> = { a: 'A', b: 'B', c: 'C', d: 'D', e: 'E' }
@@ -225,11 +228,15 @@ function QuestionCard({
   onSave,
   onDelete,
   delay,
+  chapters,
+  lectures,
 }: {
   question: Question
   onSave: (id: string, data: Partial<Question>) => Promise<void>
   onDelete: (id: string) => Promise<void>
   delay: number
+  chapters: Chapter[]
+  lectures: Lecture[]
 }) {
   const [expanded, setExpanded] = useState(false)
   const [form, setForm] = useState({
@@ -353,6 +360,42 @@ function QuestionCard({
             value={form.question_text}
             onChange={e => set('question_text', e.target.value)}
           />
+
+          {/* Chapter / Lecture */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <p className="ep-label">Chapter</p>
+              <select
+                className="ep-input"
+                value={form.chapter}
+                onChange={e => {
+                  set('chapter', e.target.value)
+                  set('lecture', '')
+                }}
+              >
+                <option value="">No chapter</option>
+                {chapters.map(c => (
+                  <option key={c.id} value={c.name}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <p className="ep-label">Lecture</p>
+              <select
+                className="ep-input"
+                value={form.lecture}
+                onChange={e => set('lecture', e.target.value)}
+                disabled={!form.chapter}
+              >
+                <option value="">No lecture</option>
+                {lectures
+                  .filter(l => chapters.find(c => c.name === form.chapter)?.id === l.chapter_id)
+                  .map(l => (
+                    <option key={l.id} value={l.name}>{l.name}</option>
+                  ))}
+              </select>
+            </div>
+          </div>
 
           {/* Answer Choices */}
           <p className="ep-label">Answer Choices</p>
@@ -497,6 +540,8 @@ export default function ExamEditPage({ params }: { params: Promise<{ serial: str
 
   const [exam,      setExam]      = useState<Exam | null>(null)
   const [questions, setQuestions] = useState<Question[]>([])
+  const [chapters,  setChapters]  = useState<Chapter[]>([])
+  const [lectures,  setLectures]  = useState<Lecture[]>([])
   const [loading,   setLoading]   = useState(true)
 
   useEffect(() => {
@@ -505,7 +550,7 @@ export default function ExamEditPage({ params }: { params: Promise<{ serial: str
         .from('exams')
         .select(`
           id, title, exam_type, calendar_year, status, question_count,
-          batch:batches(name, subject:subjects(name)),
+          batch:batches(name, subject:subjects(id, name)),
           doctor:doctors(name)
         `)
         .eq('serial_number', serial)
@@ -522,6 +567,28 @@ export default function ExamEditPage({ params }: { params: Promise<{ serial: str
           .is('deleted_at', null)
           .order('question_order')
         setQuestions(qRes.data ?? [])
+      }
+
+      const subjectId = (examData?.batch as any)?.subject?.id
+      if (subjectId) {
+        const chRes = await supabase
+          .from('chapters')
+          .select('id, name')
+          .eq('subject_id', subjectId)
+          .order('name')
+        if (chRes.error) console.error('Failed to load chapters:', chRes.error.message)
+        setChapters(chRes.data ?? [])
+
+        const chapterIds = (chRes.data ?? []).map(c => c.id)
+        if (chapterIds.length > 0) {
+          const lecRes = await supabase
+            .from('lectures')
+            .select('id, name, chapter_id')
+            .in('chapter_id', chapterIds)
+            .order('name')
+          if (lecRes.error) console.error('Failed to load lectures:', lecRes.error.message)
+          setLectures(lecRes.data ?? [])
+        }
       }
 
       setLoading(false)
@@ -542,6 +609,13 @@ export default function ExamEditPage({ params }: { params: Promise<{ serial: str
       .update({ deleted_at: new Date().toISOString() })
       .eq('id', id)
     setQuestions(p => p.filter(q => q.id !== id))
+    if (exam) {
+      await supabase
+        .from('exams')
+        .update({ question_count: Math.max(0, (exam.question_count ?? 1) - 1) })
+        .eq('id', exam.id)
+      setExam(prev => prev ? { ...prev, question_count: Math.max(0, prev.question_count - 1) } : prev)
+    }
   }
 
   // ── Derived ──────────────────────────────────────────────────────────────────
@@ -635,6 +709,8 @@ export default function ExamEditPage({ params }: { params: Promise<{ serial: str
                         onSave={handleSave}
                         onDelete={handleDelete}
                         delay={i * 40}
+                        chapters={chapters}
+                        lectures={lectures}
                       />
                     ))}
                   </div>
