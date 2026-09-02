@@ -367,8 +367,8 @@ function QuestionCard({
             onChange={e => set('question_text', e.target.value)}
           />
 
-          {/* Chapter / Lecture */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          {/* Chapter / Lecture / Doctor */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
             <div>
               <p className="ep-label">Chapter</p>
               <select
@@ -401,23 +401,21 @@ function QuestionCard({
                   ))}
               </select>
             </div>
-          </div>
-
-          {/* Doctor */}
-          <div style={{ marginTop: 12 }}>
-            <p className="ep-label">Doctor</p>
-            <select
-              className="ep-input"
-              value={form.doctor_id}
-              onChange={e => set('doctor_id', e.target.value)}
-            >
-              <option value="">No doctor</option>
-              {examDoctors.map(ed => {
-                const name = Array.isArray(ed.doctor) ? ed.doctor[0]?.name : ed.doctor?.name
-                if (!name) return null
-                return <option key={ed.doctor_id} value={ed.doctor_id}>{name}</option>
-              })}
-            </select>
+            <div>
+              <p className="ep-label">Doctor</p>
+              <select
+                className="ep-input"
+                value={form.doctor_id}
+                onChange={e => set('doctor_id', e.target.value)}
+              >
+                <option value="">No doctor</option>
+                {examDoctors.map(ed => {
+                  const name = Array.isArray(ed.doctor) ? ed.doctor[0]?.name : ed.doctor?.name
+                  if (!name) return null
+                  return <option key={ed.doctor_id} value={ed.doctor_id}>{name}</option>
+                })}
+              </select>
+            </div>
           </div>
 
           {/* Answer Choices */}
