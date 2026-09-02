@@ -14,7 +14,7 @@ interface Exam {
   academic_year: { name: string } | null
   batch: { name: string } | null
   batch_detail: { subject: { name: string; semester_id: string | null; year_id: string | null } | null } | null
-  doctor: { name: string } | null
+  exam_doctors: Array<{ doctor: { name: string } | null }> | null
 }
 
 interface AcademicYear { id: string; name: string; is_clinical: boolean }
@@ -143,7 +143,7 @@ export default function ExamsPage() {
         academic_year:academic_years(name),
         batch:batches(name),
         batch_detail:batches(subject:subjects(name, semester_id, year_id)),
-        doctor:doctors(name)
+        exam_doctors(doctor:doctors(name))
       `).is('deleted_at', null).order('created_at', { ascending: false }),
       supabase.from('academic_years').select('id, name, is_clinical').order('display_order'),
       supabase.from('semesters').select('id, name, academic_year_id').order('display_order'),
@@ -256,7 +256,7 @@ export default function ExamsPage() {
   function ExamRow({ exam }: { exam: Exam }) {
     const subjectName = (exam.batch_detail as any)?.subject?.name ?? ''
     const batchName   = (exam.batch as any)?.name ?? ''
-    const doctorName  = (exam.doctor as any)?.name ?? ''
+    const doctorName  = (Array.isArray((exam as any).exam_doctors) ? (exam as any).exam_doctors.map((ed: any) => Array.isArray(ed.doctor) ? ed.doctor[0]?.name : ed.doctor?.name).filter(Boolean).join(', ') : '') ?? ''
     const isPublished = exam.status === 'published'
 
     const statusBg    = isPublished
