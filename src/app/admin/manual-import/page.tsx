@@ -212,6 +212,8 @@ export default function ManualImportPage() {
       .is('deleted_at', null)
     let orderStart = (existingCount || 0) + 1
     let saved = 0
+    const { data: { user } } = await supabase.auth.getUser()
+    const created_by = user?.id ?? null
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i]
       const { data: inserted, error: insertError } = await supabase.from('questions').insert({
@@ -230,6 +232,7 @@ export default function ManualImportPage() {
         chapter_id: q.chapter_id || null,
         lecture_id: q.lecture_id || null,
         doctor_id: q.doctor_id || null,
+        created_by: created_by,
       }).select('id').single()
       if (insertError || !inserted) continue
       saved++

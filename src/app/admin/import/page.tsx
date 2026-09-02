@@ -212,6 +212,8 @@ const [pendingLectureNums, setPendingLectureNums] = useState<{ name: string; num
     if (parseErrors.length > 0 || validationErrors.length > 0) { alert('Please fix all errors before importing.'); return }
     setIsImporting(true)
     let imported = 0; let errors = 0
+    const { data: { user } } = await supabase.auth.getUser()
+    const created_by = user?.id ?? null
     const { count: existingCount } = await supabase
       .from('questions')
       .select('id', { count: 'exact', head: true })
@@ -233,6 +235,7 @@ const [pendingLectureNums, setPendingLectureNums] = useState<{ name: string; num
         incorrect_explanation_c: q.wrongExplanations?.c || null, incorrect_explanation_d: q.wrongExplanations?.d || null,
         incorrect_explanation_e: q.wrongExplanations?.e || null,
         doctor_id: doctorId,
+        created_by: created_by,
         chapter_id: (() => {
           const subjectId = getSubjectIdForExam(selectedExam)
           const c = allChapters.find(ch => ch.name.toLowerCase().trim() === (q.chapterName || '').toLowerCase().trim() && ch.subject_id === subjectId)
