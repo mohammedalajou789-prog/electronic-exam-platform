@@ -19,7 +19,7 @@ export default async function WrongQuestionsPage({
     .select(`
       id, question_id, exam_id, created_at,
       question:questions(
-        id, question_text, chapter, lecture,
+        id, question_text, chapter_id, lecture_id, chapter:chapters(id, name), lecture:lectures(id, name),
         choice_a, choice_b, choice_c, choice_d, choice_e,
         correct_answer, explanation,
         incorrect_explanation_a, incorrect_explanation_b,
@@ -53,8 +53,10 @@ export default async function WrongQuestionsPage({
   // Chapter stats for the tip
   const chapterMap: Record<string, { count: number; lectures: Set<string> }> = {}
   for (const w of wrong) {
-    const ch  = (w.question as any)?.chapter
-    const lec = (w.question as any)?.lecture
+    const chObj = (w.question as any)?.chapter
+    const leObj = (w.question as any)?.lecture
+    const ch  = Array.isArray(chObj) ? chObj[0]?.name : chObj?.name
+    const lec = Array.isArray(leObj) ? leObj[0]?.name : leObj?.name
     if (!ch) continue
     if (!chapterMap[ch]) chapterMap[ch] = { count: 0, lectures: new Set() }
     chapterMap[ch].count++

@@ -56,7 +56,8 @@ export interface ExamResult {
 }
 
 export interface ChapterPerformance {
-  chapter: string
+  chapterId: string
+  chapterName: string
   total: number
   correct: number
   incorrect: number
@@ -69,7 +70,6 @@ export interface ChapterPerformance {
 
 export interface ExamWithDetails extends Exam {
   batch: Batch
-  doctor: Doctor | null
   subject: Subject
 }
 
@@ -80,6 +80,8 @@ export interface QuestionWithImages extends Question {
     caption: string | null
     display_order: number
   }>
+  chapter: { id: string; name: string } | null
+  lecture: { id: string; name: string } | null
 }
 
 export interface QuestionWithStats extends QuestionWithImages {
@@ -102,8 +104,8 @@ export interface CustomExamFilters {
   subjectId: string
   batchIds: string[]
   doctorIds: string[]
-  chapters: string[]
-  lectures: string[]
+  chapterIds: string[]
+  lectureIds: string[]
   questionCount: number
   randomizeQuestions: boolean
   randomizeAnswers: boolean

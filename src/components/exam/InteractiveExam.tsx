@@ -31,8 +31,8 @@ interface Question {
   incorrect_explanation_c: string | null
   incorrect_explanation_d: string | null
   incorrect_explanation_e: string | null
-  chapter: string | null
-  lecture: string | null
+  chapter: { id: string; name: string } | null
+  lecture: { id: string; name: string } | null
   question_order: number
   doctor?: { name: string } | null
   question_images?: QuestionImage[]
@@ -553,7 +553,7 @@ export default function InteractiveExam({
 
   const byChapter: Record<string, { correct: number; total: number }> = {}
   questions.forEach(q => {
-    const ch = q.chapter ?? 'Other'
+    const ch = q.chapter?.name ?? 'Other'
     if (!byChapter[ch]) byChapter[ch] = { correct: 0, total: 0 }
     byChapter[ch].total++
     if (answers[q.id] === q.correct_answer) byChapter[ch].correct++
@@ -852,7 +852,7 @@ export default function InteractiveExam({
               >
                 {current + 1}
               </span>
-              {currentQ.chapter && (
+              {currentQ.chapter?.name && (
                 <span
                   style={{
                     padding: '4px 10px',
@@ -864,10 +864,10 @@ export default function InteractiveExam({
                     fontWeight: 700,
                   }}
                 >
-                  {currentQ.chapter}
+                  {currentQ.chapter?.name}
                 </span>
               )}
-              {currentQ.lecture && (
+              {currentQ.lecture?.name && (
                 <span
                   style={{
                     padding: '4px 10px',
@@ -878,7 +878,7 @@ export default function InteractiveExam({
                     fontWeight: 700,
                   }}
                 >
-                  {currentQ.lecture}
+                  {currentQ.lecture?.name}
                 </span>
               )}
               {currentQ.doctor?.name && (
@@ -2116,7 +2116,7 @@ export default function InteractiveExam({
                 >
                   {i + 1}
                 </span>
-                {q.chapter && (
+                {q.chapter?.name && (
                   <span
                     style={{
                       padding: '4px 10px', borderRadius: 999,
@@ -2124,10 +2124,10 @@ export default function InteractiveExam({
                       color: 'var(--accent-blue)', fontSize: 12, fontWeight: 700,
                     }}
                   >
-                    {q.chapter}
+                    {q.chapter?.name}
                   </span>
                 )}
-                {q.lecture && (
+                {q.lecture?.name && (
                   <span
                     style={{
                       padding: '4px 10px', borderRadius: 999,
@@ -2135,7 +2135,7 @@ export default function InteractiveExam({
                       fontSize: 12, fontWeight: 700,
                     }}
                   >
-                    {q.lecture}
+                    {q.lecture?.name}
                   </span>
                 )}
                 {correctPct !== null && (

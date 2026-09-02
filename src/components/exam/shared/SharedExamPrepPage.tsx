@@ -53,11 +53,16 @@ export default async function SharedExamPrepPage({
 
     const { data: qChapters } = await supabase
       .from('questions')
-      .select('chapter')
+      .select('chapter:chapters(id, name)')
       .eq('exam_id', examId)
-      .not('chapter', 'is', null)
+      .not('chapter_id', 'is', null)
 
-    chapters = [...new Set((qChapters || []).map((q: any) => q.chapter).filter(Boolean))] as string[]
+    const chapterNames = new Set<string>()
+    ;(qChapters || []).forEach((q: any) => {
+      const ch = Array.isArray(q.chapter) ? q.chapter[0] : q.chapter
+      if (ch?.name) chapterNames.add(ch.name)
+    })
+    chapters = Array.from(chapterNames)
 
     // saved progress
     const { data: { user } } = await supabase.auth.getUser()
@@ -87,13 +92,18 @@ export default async function SharedExamPrepPage({
 
     const { data: qData } = await supabase
       .from('questions')
-      .select('chapter')
+      .select('chapter:chapters(id, name)')
       .in('id', customExam.question_ids)
       .is('deleted_at', null)
 
     if (!qData || qData.length === 0) notFound()
 
-    chapters = [...new Set(qData.map((q: any) => q.chapter).filter(Boolean))] as string[]
+    const chapterNames2 = new Set<string>()
+    ;(qData || []).forEach((q: any) => {
+      const ch = Array.isArray(q.chapter) ? q.chapter[0] : q.chapter
+      if (ch?.name) chapterNames2.add(ch.name)
+    })
+    chapters = Array.from(chapterNames2)
   }
 
   const answeredCount = savedProgress

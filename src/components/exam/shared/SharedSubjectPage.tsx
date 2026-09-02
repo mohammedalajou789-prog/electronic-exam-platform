@@ -53,7 +53,7 @@ export default async function SharedSubjectPage({
       ? supabase.from('exam_doctors').select('doctor:doctors(id, name)').in('exam_id', allExamIds)
       : Promise.resolve({ data: [] }),
     allExamIds.length > 0
-      ? supabase.from('questions').select('chapter, lecture').in('exam_id', allExamIds).is('deleted_at', null)
+      ? supabase.from('questions').select('chapter_id, lecture_id, chapter:chapters(id, name), lecture:lectures(id, name)').in('exam_id', allExamIds).is('deleted_at', null)
       : Promise.resolve({ data: [] }),
   ])
 
@@ -62,8 +62,16 @@ export default async function SharedSubjectPage({
     if (r.doctor) doctorMap.set(r.doctor.id, r.doctor.name)
   })
   const doctors = Array.from(doctorMap, ([id, name]) => ({ id, name }))
-  const chapters = [...new Set((qMeta.data ?? []).map((q: any) => q.chapter).filter(Boolean))] as string[]
-  const lectures = [...new Set((qMeta.data ?? []).map((q: any) => q.lecture).filter(Boolean))] as string[]
+  const chapterMap = new Map<string, string>()
+  const lectureMap = new Map<string, string>()
+  ;(qMeta.data ?? []).forEach((q: any) => {
+    const ch = Array.isArray(q.chapter) ? q.chapter[0] : q.chapter
+    const le = Array.isArray(q.lecture) ? q.lecture[0] : q.lecture
+    if (ch?.id) chapterMap.set(ch.id, ch.name)
+    if (le?.id) lectureMap.set(le.id, le.name)
+  })
+  const chapters = Array.from(chapterMap, ([id, name]) => ({ id, name }))
+  const lectures = Array.from(lectureMap, ([id, name]) => ({ id, name }))
 
   function nameToSlug(s: string) {
     return s.toLowerCase().replace(/\s+/g, '-')

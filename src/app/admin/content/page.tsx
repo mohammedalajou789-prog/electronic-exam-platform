@@ -479,6 +479,19 @@ export default function ContentManagementPage() {
   async function createExam() {
     if (!newExamYear || !newExamSubjectId || !newExamBatchId || !newExamTitle.trim()) return
     setIsLoading(true)
+
+    const { data: { user } } = await supabase.auth.getUser()
+
+    let adminName: string | null = null
+    if (user?.id) {
+      const { data: adminData } = await supabase
+        .from('admins')
+        .select('display_name')
+        .eq('id', user.id)
+        .single()
+      adminName = adminData?.display_name ?? null
+    }
+
     const { data: examData, error } = await supabase.from('exams').insert({
       batch_id: newExamBatchId,
       title: newExamTitle.trim(),
@@ -487,6 +500,8 @@ export default function ContentManagementPage() {
       status: newExamStatus,
       academic_year_id: newExamYear,
       question_count: 0,
+      created_by: user?.id ?? null,
+      created_by_name: adminName,
     } as any).select('id').single()
     if (error) { showToast(error.message, 'error'); setIsLoading(false); return }
     // Insert exam_doctors for each selected doctor

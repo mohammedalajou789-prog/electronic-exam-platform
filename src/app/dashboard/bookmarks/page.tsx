@@ -18,7 +18,7 @@ export default async function BookmarksPage({
     .select(`
       id, question_id, created_at,
       question:questions(
-        id, question_text, chapter, lecture,
+        id, question_text, chapter_id, lecture_id, chapter:chapters(id, name), lecture:lectures(id, name),
         choice_a, choice_b, choice_c, choice_d, choice_e,
         correct_answer, explanation,
         incorrect_explanation_a, incorrect_explanation_b,

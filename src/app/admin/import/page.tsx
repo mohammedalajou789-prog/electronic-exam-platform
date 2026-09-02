@@ -142,17 +142,17 @@ const [pendingLectureNums, setPendingLectureNums] = useState<{ name: string; num
         if (!validDoctorNames.includes(q.doctorName.toLowerCase().trim()))
           errors.push(`Question ${q.questionNumber}: Doctor "${q.doctorName}" not found. Available: ${doctors.map(d => d.name).join(', ') || 'none'}`)
       }
-      if (q.chapter) {
-        const chapterLower = q.chapter.toLowerCase().trim()
+      if (q.chapterName) {
+        const chapterLower = q.chapterName.toLowerCase().trim()
         if (!validChapterNames.includes(chapterLower)) {
-          errors.push(`Question ${q.questionNumber}: Chapter "${q.chapter}" not found. Available: ${examInfo?.chapters.join(', ') || 'none'}`)
-        } else if (q.lecture) {
+          errors.push(`Question ${q.questionNumber}: Chapter "${q.chapterName}" not found. Available: ${examInfo?.chapters.join(', ') || 'none'}`)
+        } else if (q.lectureName) {
           const chapter = allChapters.find(c => c.subject_id === subjectId && c.name.toLowerCase().trim() === chapterLower)
           if (chapter) {
             const validLectureNames = allLectures.filter(l => l.chapter_id === chapter.id).map(l => l.name.toLowerCase().trim())
-            if (!validLectureNames.includes(q.lecture.toLowerCase().trim())) {
+            if (!validLectureNames.includes(q.lectureName.toLowerCase().trim())) {
               const chapterLectures = allLectures.filter(l => l.chapter_id === chapter.id).map(l => l.name)
-              errors.push(`Question ${q.questionNumber}: Lecture "${q.lecture}" not found under "${q.chapter}". Available: ${chapterLectures.join(', ') || 'none'}`)
+              errors.push(`Question ${q.questionNumber}: Lecture "${q.lectureName}" not found under "${q.chapterName}". Available: ${chapterLectures.join(', ') || 'none'}`)
             }
           }
         }
@@ -231,7 +231,19 @@ const [pendingLectureNums, setPendingLectureNums] = useState<{ name: string; num
         correct_answer: q.correctAnswer, explanation: q.explanation || null,
         incorrect_explanation_a: q.wrongExplanations?.a || null, incorrect_explanation_b: q.wrongExplanations?.b || null,
         incorrect_explanation_c: q.wrongExplanations?.c || null, incorrect_explanation_d: q.wrongExplanations?.d || null,
-        incorrect_explanation_e: q.wrongExplanations?.e || null, chapter: q.chapter || null, lecture: q.lecture || null,
+        incorrect_explanation_e: q.wrongExplanations?.e || null,
+        chapter_id: (() => {
+          const subjectId = getSubjectIdForExam(selectedExam)
+          const c = allChapters.find(ch => ch.name.toLowerCase().trim() === (q.chapterName || '').toLowerCase().trim() && ch.subject_id === subjectId)
+          return c?.id || null
+        })(),
+        lecture_id: (() => {
+          const subjectId = getSubjectIdForExam(selectedExam)
+          const c = allChapters.find(ch => ch.name.toLowerCase().trim() === (q.chapterName || '').toLowerCase().trim() && ch.subject_id === subjectId)
+          if (!c) return null
+          const l = allLectures.find(le => le.name.toLowerCase().trim() === (q.lectureName || '').toLowerCase().trim() && le.chapter_id === c.id)
+          return l?.id || null
+        })(),
       }).select('id').single()
       if (error || !inserted) { errors++; continue }
       imported++
@@ -239,8 +251,7 @@ const [pendingLectureNums, setPendingLectureNums] = useState<{ name: string; num
       if (images.length > 0) await uploadImagesForQuestion(inserted.id, images)
       if (doctorId) await supabase.from('exam_doctors').upsert({ exam_id: selectedExam, doctor_id: doctorId })
     }
-    const { data: existingExam } = await supabase.from('exams').select('question_count').eq('id', selectedExam).single()
-    await supabase.from('exams').update({ question_count: (existingExam?.question_count || 0) + imported }).eq('id', selectedExam)
+    await supabase.from('exams').update({ question_count: (existingCount || 0) + imported }).eq('id', selectedExam)
     await supabase.from('bulk_imports').insert({ questions_imported: imported, errors, warnings: parseWarnings.length })
     setImportResult({ imported, errors })
     setStep('done')

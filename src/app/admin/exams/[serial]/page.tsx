@@ -20,8 +20,8 @@ interface Question {
   incorrect_explanation_c: string | null
   incorrect_explanation_d: string | null
   incorrect_explanation_e: string | null
-  chapter: string | null
-  lecture: string | null
+  chapter_id: string | null
+  lecture_id: string | null
 }
 
 interface Exam {
@@ -253,8 +253,8 @@ function QuestionCard({
     incorrect_explanation_c: question.incorrect_explanation_c ?? '',
     incorrect_explanation_d: question.incorrect_explanation_d ?? '',
     incorrect_explanation_e: question.incorrect_explanation_e ?? '',
-    chapter:                 question.chapter ?? '',
-    lecture:                 question.lecture ?? '',
+    chapter_id:              question.chapter_id ?? '',
+    lecture_id:              question.lecture_id ?? '',
   })
   const [saving, setSaving]   = useState(false)
   const [saved, setSaved]     = useState(false)
@@ -281,8 +281,8 @@ function QuestionCard({
       incorrect_explanation_c: form.incorrect_explanation_c || null,
       incorrect_explanation_d: form.incorrect_explanation_d || null,
       incorrect_explanation_e: form.incorrect_explanation_e || null,
-      chapter:                 form.chapter || null,
-      lecture:                 form.lecture || null,
+      chapter_id:              form.chapter_id || null,
+      lecture_id:              form.lecture_id || null,
     })
     setSaving(false); setSaved(true)
     setTimeout(() => setSaved(false), 2500)
@@ -316,9 +316,9 @@ function QuestionCard({
             {form.question_text}
           </div>
           <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 5 }}>
-            {form.chapter && <span>{form.chapter}</span>}
-            {form.chapter && form.lecture && <span> · </span>}
-            {form.lecture && <span>{form.lecture}</span>}
+            {chapters.find(c => c.id === form.chapter_id)?.name && <span>{chapters.find(c => c.id === form.chapter_id)?.name}</span>}
+            {form.chapter_id && form.lecture_id && <span> · </span>}
+            {lectures.find(l => l.id === form.lecture_id)?.name && <span>{lectures.find(l => l.id === form.lecture_id)?.name}</span>}
           </div>
         </div>
 
@@ -367,15 +367,15 @@ function QuestionCard({
               <p className="ep-label">Chapter</p>
               <select
                 className="ep-input"
-                value={form.chapter}
+                value={form.chapter_id}
                 onChange={e => {
-                  set('chapter', e.target.value)
-                  set('lecture', '')
+                  set('chapter_id', e.target.value)
+                  set('lecture_id', '')
                 }}
               >
                 <option value="">No chapter</option>
                 {chapters.map(c => (
-                  <option key={c.id} value={c.name}>{c.name}</option>
+                  <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </select>
             </div>
@@ -383,15 +383,15 @@ function QuestionCard({
               <p className="ep-label">Lecture</p>
               <select
                 className="ep-input"
-                value={form.lecture}
-                onChange={e => set('lecture', e.target.value)}
-                disabled={!form.chapter}
+                value={form.lecture_id}
+                onChange={e => set('lecture_id', e.target.value)}
+                disabled={!form.chapter_id}
               >
                 <option value="">No lecture</option>
                 {lectures
-                  .filter(l => chapters.find(c => c.name === form.chapter)?.id === l.chapter_id)
+                  .filter(l => l.chapter_id === form.chapter_id)
                   .map(l => (
-                    <option key={l.id} value={l.name}>{l.name}</option>
+                    <option key={l.id} value={l.id}>{l.name}</option>
                   ))}
               </select>
             </div>

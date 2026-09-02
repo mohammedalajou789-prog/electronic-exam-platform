@@ -21,8 +21,8 @@ interface Question {
   incorrect_explanation_c: string | null
   incorrect_explanation_d: string | null
   incorrect_explanation_e: string | null
-  chapter: string | null
-  lecture: string | null
+  chapter: { id: string; name: string } | null
+  lecture: { id: string; name: string } | null
   question_statistics?: { attempts: number; correct_answers: number }[]
   [key: string]: unknown
 }
@@ -61,7 +61,7 @@ export default function ReviewQuestion({ question, index }: { question: Question
             background: 'color-mix(in srgb, var(--accent-blue) 15%, var(--bg-soft))',
             color: 'var(--accent-blue)', fontSize: 12, fontWeight: 700,
           }}>
-            {question.chapter}
+            {question.chapter?.name}
           </span>
         )}
         {question.lecture && (
@@ -70,7 +70,7 @@ export default function ReviewQuestion({ question, index }: { question: Question
             background: 'var(--bg-soft)',
             color: 'var(--fg-muted)', fontSize: 12, fontWeight: 700,
           }}>
-            {question.lecture}
+            {question.lecture?.name}
           </span>
         )}
         {correctPercent !== null && (

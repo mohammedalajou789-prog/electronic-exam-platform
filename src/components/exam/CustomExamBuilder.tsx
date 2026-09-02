@@ -6,12 +6,14 @@ import { Shuffle, Play, X, ChevronDown, ChevronUp } from 'lucide-react'
 
 interface Batch { id: string; name: string }
 interface Doctor { id: string; name: string }
+interface ChapterItem { id: string; name: string }
+interface LectureItem { id: string; name: string }
 interface Props {
   subjectId: string
   batches: Batch[]
   doctors: Doctor[]
-  chapters: string[]
-  lectures: string[]
+  chapters: ChapterItem[]
+  lectures: LectureItem[]
   basePath: string
 }
 
@@ -155,8 +157,8 @@ export default function CustomExamBuilder({ subjectId, batches, doctors, chapter
               </p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {chapters.map(ch => (
-                  <button key={ch} onClick={() => toggleItem(ch, selectedChapters, setSelectedChapters)} style={pill(selectedChapters.includes(ch))}>
-                    {ch}
+                  <button key={ch.id} onClick={() => toggleItem(ch.id, selectedChapters, setSelectedChapters)} style={pill(selectedChapters.includes(ch.id))}>
+                    {ch.name}
                   </button>
                 ))}
               </div>
@@ -171,8 +173,8 @@ export default function CustomExamBuilder({ subjectId, batches, doctors, chapter
               </p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {lectures.map(lec => (
-                  <button key={lec} onClick={() => toggleItem(lec, selectedLectures, setSelectedLectures)} style={pill(selectedLectures.includes(lec))}>
-                    {lec}
+                  <button key={lec.id} onClick={() => toggleItem(lec.id, selectedLectures, setSelectedLectures)} style={pill(selectedLectures.includes(lec.id))}>
+                    {lec.name}
                   </button>
                 ))}
               </div>

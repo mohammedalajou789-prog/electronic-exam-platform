@@ -27,7 +27,7 @@ export default async function SharedPlayPage({ examId, customExamId, resume }: P
 
     const { data: questions } = await supabase
       .from('questions')
-      .select('*, question_images(*), question_statistics(*)')
+      .select('*, question_images(*), question_statistics(*), chapter:chapters(id, name), lecture:lectures(id, name)')
       .in('id', customExam.question_ids)
       .is('deleted_at', null)
 
@@ -68,7 +68,7 @@ export default async function SharedPlayPage({ examId, customExamId, resume }: P
 
   const { data: questions } = await supabase
     .from('questions')
-    .select('*, question_images(*), question_statistics(*), doctor:doctors(name)')
+    .select('*, question_images(*), question_statistics(*), doctor:doctors(name), chapter:chapters(id, name), lecture:lectures(id, name)')
     .eq('exam_id', examId)
     .is('deleted_at', null)
     .order('question_order', { ascending: true })

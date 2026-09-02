@@ -1,4 +1,4 @@
-﻿export const runtime = 'nodejs'
+export const runtime = 'nodejs'
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 
@@ -11,8 +11,8 @@ export async function GET(request: NextRequest) {
     const randomize = searchParams.get('randomize') === 'true'
     const batchIds = searchParams.get('batches')?.split(',').filter(Boolean) || []
     const doctorIds = searchParams.get('doctors')?.split(',').filter(Boolean) || []
-    const chapters = searchParams.get('chapters')?.split(',').filter(Boolean) || []
-    const lectures = searchParams.get('lectures')?.split(',').filter(Boolean) || []
+    const chapterIds = searchParams.get('chapters')?.split(',').filter(Boolean) || []
+    const lectureIds = searchParams.get('lectures')?.split(',').filter(Boolean) || []
 
     if (!subjectId) {
       return NextResponse.json({ error: 'subjectId is required' }, { status: 400 })
@@ -23,12 +23,11 @@ export async function GET(request: NextRequest) {
     // Get all published exams for this subject
     let examQuery = supabase
       .from('exams')
-      .select('id, batch_id, doctor_id')
+      .select('id, batch_id')
       .eq('status', 'published')
       .is('deleted_at', null)
       .in(
         'batch_id',
-        // Sub-select: get all batch IDs for this subject
         (
           await supabase
             .from('batches')
@@ -42,7 +41,6 @@ export async function GET(request: NextRequest) {
     }
 
     if (doctorIds.length > 0) {
-      // Filter by doctor through exam_doctors join
       const { data: examDoctors } = await supabase
         .from('exam_doctors')
         .select('exam_id')
@@ -76,12 +74,12 @@ export async function GET(request: NextRequest) {
       .in('exam_id', examIds)
       .is('deleted_at', null)
 
-    if (chapters.length > 0) {
-      questionQuery = questionQuery.in('chapter', chapters)
+    if (chapterIds.length > 0) {
+      questionQuery = questionQuery.in('chapter_id', chapterIds)
     }
 
-    if (lectures.length > 0) {
-      questionQuery = questionQuery.in('lecture', lectures)
+    if (lectureIds.length > 0) {
+      questionQuery = questionQuery.in('lecture_id', lectureIds)
     }
 
     const { data: allQuestions } = await questionQuery
@@ -102,9 +100,6 @@ export async function GET(request: NextRequest) {
       selectedIds = allQuestions.slice(0, count).map(q => q.id)
     }
 
-    // Store the custom exam session in study_progress-like table
-    // We use a simple approach: store question IDs in a temporary custom_exams table
-    // For now, we pass the IDs via a signed token approach using a simple DB record
     const { data: customExam, error } = await supabase
       .from('custom_exams')
       .insert({

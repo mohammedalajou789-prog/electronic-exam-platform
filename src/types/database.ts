@@ -14,6 +14,7 @@ export interface AcademicYear {
   id: string
   name: string
   display_order: number
+  is_clinical: boolean
   created_at: string
   updated_at: string
 }
@@ -29,7 +30,8 @@ export interface Semester {
 
 export interface Subject {
   id: string
-  semester_id: string
+  semester_id: string | null
+  year_id: string | null
   name: string
   description: string | null
   icon: string | null
@@ -56,6 +58,24 @@ export interface Doctor {
   updated_at: string
 }
 
+export interface Chapter {
+  id: string
+  subject_id: string
+  name: string
+  display_order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface Lecture {
+  id: string
+  chapter_id: string
+  name: string
+  display_order: number
+  created_at: string
+  updated_at: string
+}
+
 // ============================================================
 // EXAMS
 // ============================================================
@@ -67,16 +87,15 @@ export type ExamStatus = 'draft' | 'published' | 'archived'
 export interface Exam {
   id: string
   batch_id: string
-  doctor_id: string | null
   title: string
   calendar_year: number | null
   exam_type: ExamType | null
-  description: string | null
   duration_minutes: number | null
   timer_mode: TimerMode
   status: ExamStatus
   question_count: number
   created_by: string | null
+  created_by_name: string | null
   created_at: string
   updated_at: string
   deleted_at: string | null
@@ -105,8 +124,8 @@ export interface Question {
   incorrect_explanation_c: string | null
   incorrect_explanation_d: string | null
   incorrect_explanation_e: string | null
-  chapter: string | null
-  lecture: string | null
+  chapter_id: string | null
+  lecture_id: string | null
   created_by: string | null
   created_at: string
   updated_at: string
@@ -228,6 +247,8 @@ export interface Admin {
   id: string
   user_id: string | null
   role: AdminRole
+  display_name: string | null
+  email: string | null
   created_at: string
   last_login: string | null
 }

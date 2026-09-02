@@ -1,9 +1,12 @@
-﻿'use client'
+'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Save, Trash2 } from 'lucide-react'
+
+interface Chapter { id: string; name: string; subject_id: string }
+interface Lecture { id: string; name: string; chapter_id: string }
 
 interface Question {
   id: string
@@ -21,17 +24,21 @@ interface Question {
   incorrect_explanation_c: string | null
   incorrect_explanation_d: string | null
   incorrect_explanation_e: string | null
-  chapter: string | null
-  lecture: string | null
+  chapter_id: string | null
+  lecture_id: string | null
 }
 
 interface Props {
   question: Question
+  subjectId: string
 }
 
-export default function QuestionEditor({ question }: Props) {
+export default function QuestionEditor({ question, subjectId }: Props) {
   const router = useRouter()
   const supabase = createClient()
+
+  const [chapters, setChapters] = useState<Chapter[]>([])
+  const [lectures, setLectures] = useState<Lecture[]>([])
 
   const [form, setForm] = useState({
     question_text: question.question_text,
@@ -47,8 +54,8 @@ export default function QuestionEditor({ question }: Props) {
     incorrect_explanation_c: question.incorrect_explanation_c ?? '',
     incorrect_explanation_d: question.incorrect_explanation_d ?? '',
     incorrect_explanation_e: question.incorrect_explanation_e ?? '',
-    chapter: question.chapter ?? '',
-    lecture: question.lecture ?? '',
+    chapter_id: question.chapter_id ?? '',
+    lecture_id: question.lecture_id ?? '',
   })
 
   const [isSaving, setIsSaving] = useState(false)
@@ -56,10 +63,39 @@ export default function QuestionEditor({ question }: Props) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [message, setMessage] = useState('')
 
+  useEffect(() => {
+    async function loadChaptersAndLectures() {
+      const { data: ch } = await supabase
+        .from('chapters')
+        .select('id, name, subject_id')
+        .eq('subject_id', subjectId)
+        .order('display_order')
+      setChapters(ch || [])
+
+      if (ch && ch.length > 0) {
+        const chapterIds = ch.map(c => c.id)
+        const { data: le } = await supabase
+          .from('lectures')
+          .select('id, name, chapter_id')
+          .in('chapter_id', chapterIds)
+          .order('display_order')
+        setLectures(le || [])
+      }
+    }
+    loadChaptersAndLectures()
+  }, [subjectId])
+
+  const availableLectures = lectures.filter(l => l.chapter_id === form.chapter_id)
+
   function handleChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) {
-    setForm(prev => ({ ...prev, [e.target.name]: e.target.value }))
+    const { name, value } = e.target
+    if (name === 'chapter_id') {
+      setForm(prev => ({ ...prev, chapter_id: value, lecture_id: '' }))
+    } else {
+      setForm(prev => ({ ...prev, [name]: value }))
+    }
   }
 
   async function handleSave() {
@@ -82,8 +118,8 @@ export default function QuestionEditor({ question }: Props) {
         incorrect_explanation_c: form.incorrect_explanation_c || null,
         incorrect_explanation_d: form.incorrect_explanation_d || null,
         incorrect_explanation_e: form.incorrect_explanation_e || null,
-        chapter: form.chapter || null,
-        lecture: form.lecture || null,
+        chapter_id: form.chapter_id || null,
+        lecture_id: form.lecture_id || null,
         updated_at: new Date().toISOString(),
       })
       .eq('id', question.id)
@@ -208,27 +244,36 @@ export default function QuestionEditor({ question }: Props) {
         </div>
       </div>
 
-      {/* Metadata */}
+      {/* Chapter & Lecture */}
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="mb-1.5 block text-sm font-medium">Chapter</label>
-          <input
-            name="chapter"
-            value={form.chapter}
+          <select
+            name="chapter_id"
+            value={form.chapter_id}
             onChange={handleChange}
-            placeholder="e.g. Cardiology"
             className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-          />
+          >
+            <option value="">Select chapter...</option>
+            {chapters.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
         </div>
         <div>
           <label className="mb-1.5 block text-sm font-medium">Lecture</label>
-          <input
-            name="lecture"
-            value={form.lecture}
+          <select
+            name="lecture_id"
+            value={form.lecture_id}
             onChange={handleChange}
-            placeholder="e.g. Heart Failure"
-            className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-          />
+            disabled={!form.chapter_id}
+            className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+          >
+            <option value="">Select lecture...</option>
+            {availableLectures.map(l => (
+              <option key={l.id} value={l.id}>{l.name}</option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -291,4 +336,3 @@ export default function QuestionEditor({ question }: Props) {
     </div>
   )
 }
-

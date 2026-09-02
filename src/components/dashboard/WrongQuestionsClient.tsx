@@ -15,8 +15,8 @@ interface WrongQuestion {
   question: {
     id: string
     question_text: string
-    chapter: string | null
-    lecture: string | null
+    chapter: { id: string; name: string } | null
+    lecture: { id: string; name: string } | null
     choice_a: string
     choice_b: string
     choice_c: string | null
@@ -107,7 +107,7 @@ export default function WrongQuestionsClient({ questions: initial, userId }: Pro
                     background: 'color-mix(in srgb, #60a5fa 14%, var(--bg-soft))',
                     color: '#2563eb',
                   }}>
-                    {q.chapter}
+                    {q.chapter.name}
                   </span>
                 )}
                 {q.lecture && (
@@ -115,7 +115,7 @@ export default function WrongQuestionsClient({ questions: initial, userId }: Pro
                     padding: '3px 10px', borderRadius: 999, fontSize: 12, fontWeight: 700,
                     background: 'var(--bg-soft)', color: 'var(--fg-muted)',
                   }}>
-                    {q.lecture}
+                    {q.lecture.name}
                   </span>
                 )}
                 <span style={{

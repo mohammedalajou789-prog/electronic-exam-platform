@@ -29,10 +29,11 @@ const SESSION_GAP_DAYS             = 30
 
 interface WeakChapter {
   chapter: string
+  chapterId: string
   error_rate: number
   wrong_count: number
   total_count: number
-  lectures: { lecture: string; wrong_count: number; total_count: number }[]
+  lectures: { lecture: string; lectureId: string; wrong_count: number; total_count: number }[]
 }
 
 export async function computeStudyTip(
@@ -139,7 +140,7 @@ export async function computeStudyTip(
 
   const { data: answers } = await supabase
     .from('attempt_answers')
-    .select('is_correct, question:questions(chapter, lecture)')
+    .select('is_correct, question:questions(chapter_id, lecture_id, chapter:chapters(id, name), lecture:lectures(id, name))')
     .in('attempt_id', sessionAttemptIds)
     .not('chosen_answer', 'is', null) // exclude skipped
 
@@ -147,26 +148,32 @@ export async function computeStudyTip(
 
   // ── 6. Compute chapter error rates ────────────────────────────────────────
   const chapterMap: Record<string, {
+    id: string
     wrong: number
     total: number
-    lectures: Record<string, { wrong: number; total: number }>
+    lectures: Record<string, { id: string; wrong: number; total: number }>
   }> = {}
 
   for (const ans of answers) {
-    const chapter = (ans.question as any)?.chapter as string | null
-    const lecture = (ans.question as any)?.lecture as string | null
+    const qData = ans.question as any
+    const chapterObj = Array.isArray(qData?.chapter) ? qData.chapter[0] : qData?.chapter
+    const lectureObj = Array.isArray(qData?.lecture) ? qData.lecture[0] : qData?.lecture
+    const chapter = chapterObj?.name as string | null
+    const chapterId = chapterObj?.id as string | null
+    const lecture = lectureObj?.name as string | null
+    const lectureId = lectureObj?.id as string | null
     if (!chapter) continue
 
     if (!chapterMap[chapter]) {
-      chapterMap[chapter] = { wrong: 0, total: 0, lectures: {} }
+      chapterMap[chapter] = { id: chapterId || chapter, wrong: 0, total: 0, lectures: {} }
     }
     chapterMap[chapter].total++
     if (!ans.is_correct) chapterMap[chapter].wrong++
 
     if (lecture) {
       if (!chapterMap[chapter].lectures[lecture]) {
-        chapterMap[chapter].lectures[lecture] = { wrong: 0, total: 0 }
-      }
+          chapterMap[chapter].lectures[lecture] = { id: lectureId || lecture, wrong: 0, total: 0 }
+        }
       chapterMap[chapter].lectures[lecture].total++
       if (!ans.is_correct) chapterMap[chapter].lectures[lecture].wrong++
     }
@@ -180,20 +187,19 @@ export async function computeStudyTip(
     })
     .map(([chapter, v]) => {
       const error_rate = v.wrong / v.total
-
-      // Rank lectures by wrong count
       const lectures = Object.entries(v.lectures)
         .filter(([, lv]) => lv.total >= MIN_ATTEMPTS_PER_LECTURE)
         .sort(([, a], [, b]) => b.wrong - a.wrong)
         .slice(0, MAX_LECTURES_PER_CHAPTER)
         .map(([lecture, lv]) => ({
           lecture,
+          lectureId: lv.id,
           wrong_count: lv.wrong,
           total_count: lv.total,
         }))
-
       return {
         chapter,
+        chapterId: v.id,
         error_rate,
         wrong_count: v.wrong,
         total_count: v.total,

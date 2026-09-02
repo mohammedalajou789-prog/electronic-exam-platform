@@ -31,8 +31,10 @@ export async function GET(req: NextRequest) {
       choice_a, choice_b, choice_c, choice_d, choice_e,
       correct_answer,
       explanation,
-      chapter,
-      lecture,
+      chapter_id,
+      lecture_id,
+      chapter:chapters(id, name),
+      lecture:lectures(id, name),
       exam:exams(
         id,
         title,
@@ -46,17 +48,16 @@ export async function GET(req: NextRequest) {
             id,
             name,
             semester_id,
-            academic_year_id,
+            year_id,
             semester:semesters(
               id,
               name,
               academic_year:academic_years!semesters_academic_year_id_fkey(id, name)
             ),
-            academic_year:academic_years!subjects_academic_year_id_fkey(id, name)
+            academic_year:academic_years!subjects_year_id_fkey(id, name)
           )
         )
-      ),
-      doctor:doctors(id, name)
+      )
     `)
     .is('deleted_at', null)
 
@@ -64,10 +65,6 @@ export async function GET(req: NextRequest) {
   if (batchId) dbQuery = dbQuery.eq('exams.batch_id', batchId)
 
   const { data: raw, error } = await dbQuery.limit(2000)
-
-  console.log('RAW COUNT:', raw?.length)
-  console.log('ERROR:', error)
-  console.log('SAMPLE:', JSON.stringify(raw?.[0], null, 2))
 
   if (error || !raw) {
     console.error('Search error:', error)
@@ -80,16 +77,14 @@ export async function GET(req: NextRequest) {
     const exam    = q.exam
     const batch   = exam?.batch
     const subject = batch?.subject
-    const doctor  = q.doctor
-
-    // Clinical: academic_year مرتبط بـ subject مباشرة
-    // Pre-clinical: academic_year مرتبط بـ semester
+    const chapterName = Array.isArray(q.chapter) ? q.chapter[0]?.name : q.chapter?.name
+    const lectureName = Array.isArray(q.lecture) ? q.lecture[0]?.name : q.lecture?.name
     const academicYear = subject?.semester?.academic_year ?? subject?.academic_year
 
     const haystack = [
       q.question_text,
-      q.chapter,
-      q.lecture,
+      chapterName,
+      lectureName,
       q.correct_answer,
       q.explanation,
       q.choice_a, q.choice_b, q.choice_c, q.choice_d, q.choice_e,
@@ -99,7 +94,6 @@ export async function GET(req: NextRequest) {
       subject?.name,
       subject?.semester?.name,
       academicYear?.name,
-      doctor?.name,
     ]
       .filter(Boolean)
       .join(' ')

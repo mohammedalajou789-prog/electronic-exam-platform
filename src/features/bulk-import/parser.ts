@@ -4,13 +4,13 @@
 //
 // 1. Question text?
 // A. Choice
-// B. Choice *   ← asterisk marks correct answer
+// B. Choice *   <- asterisk marks correct answer
 // C. Choice
 // D. Choice
-// E. Choice     ← optional
+// E. Choice     <- optional
 // Chapter: Chapter Name
 // Lecture: Lecture Name
-// Doctor: Dr. Name   ← optional
+// Doctor: Dr. Name   <- optional
 // Explanation: ...
 // Wrong answers explanation:
 // A. ...
@@ -28,8 +28,8 @@ export interface ParsedQuestion {
     e?: string
   }
   correctAnswer: 'a' | 'b' | 'c' | 'd' | 'e'
-  chapter?: string
-  lecture?: string
+  chapterName?: string
+  lectureName?: string
   doctorName?: string
   explanation?: string
   wrongExplanations?: {
@@ -105,7 +105,7 @@ export function parseBulkImport(rawText: string): ParseResult {
     warnings.push(`${noExplanation.length} question(s) have no explanation.`)
   }
 
-  const noChapter = questions.filter(q => !q.chapter)
+  const noChapter = questions.filter(q => !q.chapterName)
   if (noChapter.length > 0) {
     warnings.push(`${noChapter.length} question(s) have no chapter assigned.`)
   }
@@ -120,8 +120,8 @@ function parseQuestionBlock(
 ): ParsedQuestion {
   const choices: Record<string, string> = {}
   let correctAnswer: string | null = null
-  let chapter: string | undefined
-  let lecture: string | undefined
+  let chapterName: string | undefined
+  let lectureName: string | undefined
   let doctorName: string | undefined
   let explanation: string | undefined
   const wrongExplanations: Record<string, string> = {}
@@ -131,7 +131,7 @@ function parseQuestionBlock(
 
   for (const line of lines) {
     // Answer choices A-E
-    const choiceMatch = line.match(/^([A-Ea-e])\.\s*(.*?)(\s*\*\s*)?$/)
+    const choiceMatch = line.match(/^([A-Ea-e])\. *(.*?)(\s*\*\s*)?$/)
     if (choiceMatch && !inWrongAnswers && !inExplanation) {
       const letter = choiceMatch[1].toLowerCase()
       const text = choiceMatch[2].trim()
@@ -141,21 +141,21 @@ function parseQuestionBlock(
       continue
     }
 
-    // Chapter — only process if NOT inside explanation
+    // Chapter
     const chapterValue = extractField(line, 'Chapter')
     if (chapterValue !== null && !inExplanation) {
-      chapter = chapterValue || undefined
+      chapterName = chapterValue || undefined
       continue
     }
 
-    // Lecture — only process if NOT inside explanation
+    // Lecture
     const lectureValue = extractField(line, 'Lecture')
     if (lectureValue !== null && !inExplanation) {
-      lecture = lectureValue || undefined
+      lectureName = lectureValue || undefined
       continue
     }
 
-    // Doctor — only process if NOT inside explanation
+    // Doctor
     const doctorValue = extractField(line, 'Doctor')
     if (doctorValue !== null && !inExplanation) {
       doctorName = doctorValue || undefined
@@ -167,11 +167,7 @@ function parseQuestionBlock(
     if (explanationValue !== null) {
       inExplanation = true
       inWrongAnswers = false
-      if (explanationValue) {
-        explanationLines = [explanationValue]
-      } else {
-        explanationLines = []
-      }
+      explanationLines = explanationValue ? [explanationValue] : []
       continue
     }
 
@@ -187,7 +183,7 @@ function parseQuestionBlock(
 
     // Wrong answer entries
     if (inWrongAnswers) {
-      const wrongMatch = line.match(/^([A-Ea-e])\.\s*(.+)$/)
+      const wrongMatch = line.match(/^([A-Ea-e])\. *(.+)$/)
       if (wrongMatch) {
         wrongExplanations[wrongMatch[1].toLowerCase()] = wrongMatch[2].trim()
         continue
@@ -196,7 +192,6 @@ function parseQuestionBlock(
 
     // Explanation continuation lines
     if (inExplanation) {
-      // Stop only if we hit a known field header
       const isKnownField =
         extractField(line, 'Chapter') !== null ||
         extractField(line, 'Lecture') !== null ||
@@ -209,12 +204,10 @@ function parseQuestionBlock(
     }
   }
 
-  // Merge explanation lines
   if (explanationLines.length > 0 && !explanation) {
     explanation = explanationLines.join('\n')
   }
 
-  // Validate choices
   if (!choices['a'] || !choices['b'] || !choices['c'] || !choices['d']) {
     throw new Error('Question must have at least 4 choices (A, B, C, D).')
   }
@@ -234,8 +227,8 @@ function parseQuestionBlock(
       e: choices['e'],
     },
     correctAnswer: correctAnswer as 'a' | 'b' | 'c' | 'd' | 'e',
-    chapter,
-    lecture,
+    chapterName,
+    lectureName,
     doctorName,
     explanation,
     wrongExplanations: Object.keys(wrongExplanations).length > 0 ? wrongExplanations : undefined,

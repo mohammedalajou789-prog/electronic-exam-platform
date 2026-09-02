@@ -15,8 +15,8 @@ interface Question {
   choice_e: string | null
   correct_answer: string
   explanation: string | null
-  chapter: string | null
-  lecture: string | null
+  chapter: { id: string; name: string } | null
+  lecture: { id: string; name: string } | null
   image_url: string | null
 }
 
@@ -93,7 +93,8 @@ export default function SharedPdfPage({ examId, customExamId }: Props) {
         .select(`
           id, question_text,
           choice_a, choice_b, choice_c, choice_d, choice_e,
-          correct_answer, explanation, chapter, lecture,
+          correct_answer, explanation,
+          chapter:chapters(id, name), lecture:lectures(id, name),
           question_images ( image_url, display_order )
         `)
         .eq('exam_id', examId)
@@ -101,8 +102,10 @@ export default function SharedPdfPage({ examId, customExamId }: Props) {
         .order('question_order', { ascending: true })
 
       if (rows) {
-        setQuestions(rows.map(r => ({
+        setQuestions(rows.map((r: any) => ({
           ...r,
+          chapter: Array.isArray(r.chapter) ? r.chapter[0] || null : r.chapter,
+          lecture: Array.isArray(r.lecture) ? r.lecture[0] || null : r.lecture,
           image_url: (r.question_images as any[])?.[0]?.image_url || null,
         })))
       }
@@ -122,15 +125,18 @@ export default function SharedPdfPage({ examId, customExamId }: Props) {
         .select(`
           id, question_text,
           choice_a, choice_b, choice_c, choice_d, choice_e,
-          correct_answer, explanation, chapter, lecture,
+          correct_answer, explanation,
+          chapter:chapters(id, name), lecture:lectures(id, name),
           question_images ( image_url, display_order )
         `)
         .in('id', customExam.question_ids)
         .is('deleted_at', null)
 
       if (rows) {
-        setQuestions(rows.map(r => ({
+        setQuestions(rows.map((r: any) => ({
           ...r,
+          chapter: Array.isArray(r.chapter) ? r.chapter[0] || null : r.chapter,
+          lecture: Array.isArray(r.lecture) ? r.lecture[0] || null : r.lecture,
           image_url: (r.question_images as any[])?.[0]?.image_url || null,
         })))
       }
@@ -240,8 +246,8 @@ export default function SharedPdfPage({ examId, customExamId }: Props) {
                 <span style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0, background: 'var(--clr-soft)', color: 'var(--clr-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800 }}>
                   {i + 1}
                 </span>
-                {q.chapter && <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: 'color-mix(in srgb, var(--accent-blue) 12%, var(--bg-soft))', color: 'var(--accent-blue)' }}>{q.chapter}</span>}
-                {q.lecture && <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: 'var(--bg-soft)', color: 'var(--fg-muted)' }}>{q.lecture}</span>}
+                {q.chapter && <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: 'color-mix(in srgb, var(--accent-blue) 12%, var(--bg-soft))', color: 'var(--accent-blue)' }}>{q.chapter.name}</span>}
+                {q.lecture && <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: 'var(--bg-soft)', color: 'var(--fg-muted)' }}>{q.lecture.name}</span>}
               </div>
               <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--fg)', lineHeight: 1.6, marginBottom: 14 }}>{q.question_text}</div>
               {q.image_url && (

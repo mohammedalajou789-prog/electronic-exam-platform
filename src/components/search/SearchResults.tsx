@@ -153,7 +153,7 @@ export default function SearchResults({ results, total, query }: Props) {
                             background: 'color-mix(in srgb, #60a5fa 14%, var(--bg-soft))',
                             color: '#2563eb',
                           }}>
-                            <Highlight text={q.chapter} terms={terms} />
+                            <Highlight text={typeof q.chapter === 'string' ? q.chapter : q.chapter?.name ?? ''} terms={terms} />
                           </span>
                         )}
                         {q.lecture && (
@@ -161,7 +161,7 @@ export default function SearchResults({ results, total, query }: Props) {
                             padding: '2px 9px', borderRadius: 999, fontSize: 11.5, fontWeight: 700,
                             background: 'var(--bg-soft)', color: 'var(--fg-muted)',
                           }}>
-                            <Highlight text={q.lecture} terms={terms} />
+                            <Highlight text={typeof q.lecture === 'string' ? q.lecture : q.lecture?.name ?? ''} terms={terms} />
                           </span>
                         )}
                       </div>

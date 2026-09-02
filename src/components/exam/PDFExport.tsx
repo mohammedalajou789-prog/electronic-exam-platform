@@ -15,8 +15,8 @@ interface Question {
   choice_e: string | null
   correct_answer: string
   explanation: string | null
-  chapter: string | null
-  lecture: string | null
+  chapter: { id: string; name: string } | null
+  lecture: { id: string; name: string } | null
 }
 
 interface Exam {
