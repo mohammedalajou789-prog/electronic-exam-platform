@@ -22,6 +22,7 @@ interface Question {
   incorrect_explanation_e: string | null
   chapter_id: string | null
   lecture_id: string | null
+  doctor_id: string | null
 }
 
 interface Exam {
@@ -35,6 +36,7 @@ interface Exam {
   exam_doctors: Array<{ doctor_id: string; doctor: { name: string } | null }> | null
 }
 
+interface ExamDoctor { doctor_id: string; doctor: { name: string } | null }
 interface Chapter { id: string; name: string }
 interface Lecture { id: string; name: string; chapter_id: string }
 
@@ -230,6 +232,7 @@ function QuestionCard({
   delay,
   chapters,
   lectures,
+  examDoctors,
 }: {
   question: Question
   onSave: (id: string, data: Partial<Question>) => Promise<void>
@@ -237,6 +240,7 @@ function QuestionCard({
   delay: number
   chapters: Chapter[]
   lectures: Lecture[]
+  examDoctors: ExamDoctor[]
 }) {
   const [expanded, setExpanded] = useState(false)
   const [form, setForm] = useState({
@@ -255,6 +259,7 @@ function QuestionCard({
     incorrect_explanation_e: question.incorrect_explanation_e ?? '',
     chapter_id:              question.chapter_id ?? '',
     lecture_id:              question.lecture_id ?? '',
+    doctor_id:               question.doctor_id ?? '',
   })
   const [saving, setSaving]   = useState(false)
   const [saved, setSaved]     = useState(false)
@@ -283,6 +288,7 @@ function QuestionCard({
       incorrect_explanation_e: form.incorrect_explanation_e || null,
       chapter_id:              form.chapter_id || null,
       lecture_id:              form.lecture_id || null,
+      doctor_id:               form.doctor_id || null,
     })
     setSaving(false); setSaved(true)
     setTimeout(() => setSaved(false), 2500)
@@ -395,6 +401,23 @@ function QuestionCard({
                   ))}
               </select>
             </div>
+          </div>
+
+          {/* Doctor */}
+          <div style={{ marginTop: 12 }}>
+            <p className="ep-label">Doctor</p>
+            <select
+              className="ep-input"
+              value={form.doctor_id}
+              onChange={e => set('doctor_id', e.target.value)}
+            >
+              <option value="">No doctor</option>
+              {examDoctors.map(ed => {
+                const name = Array.isArray(ed.doctor) ? ed.doctor[0]?.name : ed.doctor?.name
+                if (!name) return null
+                return <option key={ed.doctor_id} value={ed.doctor_id}>{name}</option>
+              })}
+            </select>
           </div>
 
           {/* Answer Choices */}
@@ -540,8 +563,9 @@ export default function ExamEditPage({ params }: { params: Promise<{ serial: str
 
   const [exam,      setExam]      = useState<Exam | null>(null)
   const [questions, setQuestions] = useState<Question[]>([])
-  const [chapters,  setChapters]  = useState<Chapter[]>([])
-  const [lectures,  setLectures]  = useState<Lecture[]>([])
+  const [chapters,     setChapters]     = useState<Chapter[]>([])
+  const [lectures,     setLectures]     = useState<Lecture[]>([])
+  const [examDoctors,  setExamDoctors]  = useState<ExamDoctor[]>([])
   const [loading,   setLoading]   = useState(true)
 
   useEffect(() => {
@@ -558,6 +582,7 @@ export default function ExamEditPage({ params }: { params: Promise<{ serial: str
 
       const examData = examRes.data as unknown as Exam
       setExam(examData)
+      setExamDoctors((examData as any)?.exam_doctors ?? [])
 
       if (examData?.id) {
         const qRes = await supabase
@@ -711,6 +736,7 @@ export default function ExamEditPage({ params }: { params: Promise<{ serial: str
                         delay={i * 40}
                         chapters={chapters}
                         lectures={lectures}
+                        examDoctors={examDoctors}
                       />
                     ))}
                   </div>
