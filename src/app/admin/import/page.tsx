@@ -922,7 +922,7 @@ QUESTIONS TO CONVERT:
                         </div>
                         <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0, marginLeft:12 }}>
                           {(stagedImages[qIndex]?.length||0)>0 && <span style={{ fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:20, background:'rgba(59,130,246,0.1)', color:'#3b82f6' }}>{stagedImages[qIndex].length} img</span>}
-                          {q.chapter && <span style={{ fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:20, background:'var(--bi-psoft)', color:'var(--bi-primary)' }}>{q.chapter}</span>}
+                          {q.chapterName && <span style={{ fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:20, background:'var(--bi-psoft)', color:'var(--bi-primary)' }}>{q.chapterName}</span>}
                           {expandedQuestions.has(q.questionNumber) ? <ChevronUp width={15} height={15} style={{ color:'var(--bi-muted)' }}/> : <ChevronDown width={15} height={15} style={{ color:'var(--bi-muted)'}}/>}
                         </div>
                       </div>
@@ -943,8 +943,8 @@ QUESTIONS TO CONVERT:
                             })}
                           </div>
                           <div style={{ display:'flex', flexWrap:'wrap', gap:12, fontSize:12.5, color:'var(--bi-muted)' }}>
-                            {q.chapter    && <span>Chapter: <strong style={{ color:'var(--bi-fg)' }}>{q.chapter}</strong></span>}
-                            {q.lecture    && <span>Lecture: <strong style={{ color:'var(--bi-fg)' }}>{q.lecture}</strong></span>}
+                            {q.chapterName && <span>Chapter: <strong style={{ color:'var(--bi-fg)' }}>{q.chapterName}</strong></span>}
+                            {q.lectureName && <span>Lecture: <strong style={{ color:'var(--bi-fg)' }}>{q.lectureName}</strong></span>}
                             {q.doctorName && <span>Doctor: <strong style={{ color:'var(--bi-fg)' }}>{q.doctorName}</strong></span>}
                           </div>
                           {q.explanation && (() => {
