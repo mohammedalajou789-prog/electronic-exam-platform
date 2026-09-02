@@ -32,7 +32,7 @@ interface Exam {
   status: string
   question_count: number
   batch: { name: string; subject: { id: string; name: string } | null } | null
-  doctor: { name: string } | null
+  exam_doctors: Array<{ doctor_id: string; doctor: { name: string } | null }> | null
 }
 
 interface Chapter { id: string; name: string }
@@ -551,7 +551,7 @@ export default function ExamEditPage({ params }: { params: Promise<{ serial: str
         .select(`
           id, title, exam_type, calendar_year, status, question_count,
           batch:batches(name, subject:subjects(id, name)),
-          doctor:doctors(name)
+          exam_doctors(doctor_id, doctor:doctors(name))
         `)
         .eq('serial_number', serial)
         .single()
