@@ -232,6 +232,7 @@ const [pendingLectureNums, setPendingLectureNums] = useState<{ name: string; num
         incorrect_explanation_a: q.wrongExplanations?.a || null, incorrect_explanation_b: q.wrongExplanations?.b || null,
         incorrect_explanation_c: q.wrongExplanations?.c || null, incorrect_explanation_d: q.wrongExplanations?.d || null,
         incorrect_explanation_e: q.wrongExplanations?.e || null,
+        doctor_id: doctorId,
         chapter_id: (() => {
           const subjectId = getSubjectIdForExam(selectedExam)
           const c = allChapters.find(ch => ch.name.toLowerCase().trim() === (q.chapterName || '').toLowerCase().trim() && ch.subject_id === subjectId)
