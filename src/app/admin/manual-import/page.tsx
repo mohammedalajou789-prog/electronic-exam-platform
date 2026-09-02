@@ -214,8 +214,6 @@ export default function ManualImportPage() {
     let saved = 0
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i]
-      const chapterName = allChapters.find(c => c.id === q.chapter_id)?.name || null
-      const lectureName = allLectures.find(l => l.id === q.lecture_id)?.name || null
       const { data: inserted, error: insertError } = await supabase.from('questions').insert({
         exam_id: selectedExam,
         question_text: q.question_text.trim(),
@@ -229,7 +227,9 @@ export default function ManualImportPage() {
         incorrect_explanation_b: q.incorrect_explanation_b.trim() || null,
         incorrect_explanation_c: q.incorrect_explanation_c.trim() || null,
         incorrect_explanation_d: q.incorrect_explanation_d.trim() || null,
-        chapter: chapterName, lecture: lectureName,
+        chapter_id: q.chapter_id || null,
+        lecture_id: q.lecture_id || null,
+        doctor_id: q.doctor_id || null,
       }).select('id').single()
       if (insertError || !inserted) continue
       saved++
