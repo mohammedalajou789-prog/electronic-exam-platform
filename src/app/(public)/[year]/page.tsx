@@ -44,7 +44,7 @@ export default async function YearPage({ params }: PageProps) {
         {(semesters || []).length > 0 ? (
           <div style={S.grid}>
             {(semesters || []).map((sem, i) => (
-              <Link key={sem.id} href={`/${yearSlug}/${nameToSlug(sem.name)}`} className="year-card" style={{ animationDelay: `${i * 60}ms` }}>
+              <Link key={sem.id} href={`/${yearSlug}/basic/${nameToSlug(sem.name)}`} className="year-card" style={{ animationDelay: `${i * 60}ms` }}>
                 <CardIcon><CalIcon /></CardIcon>
                 <div style={{ flex: 1 }}>
                   <div style={S.cardTitle}>{sem.name}</div>
@@ -79,7 +79,7 @@ export default async function YearPage({ params }: PageProps) {
       {subjects.length > 0 ? (
         <div style={{ ...S.grid, gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))' }}>
           {subjects.map((sub, i) => (
-            <Link key={sub.id} href={`/${yearSlug}/${nameToSlug(sub.name)}`} className="year-card" style={{ animationDelay: `${i * 60}ms`, flexDirection: 'column', alignItems: 'flex-start' }}>
+            <Link key={sub.id} href={`/${yearSlug}/clinical/${nameToSlug(sub.name)}`} className="year-card" style={{ animationDelay: `${i * 60}ms`, flexDirection: 'column', alignItems: 'flex-start' }}>
               <div style={{ ...S.cardIconWrap, marginBottom: 14 }}><BookIcon /></div>
               <div style={S.cardTitle}>{sub.name}</div>
               <div style={S.cardMeta}>{sub.examCount} exams · {sub.questionCount} questions</div>
