@@ -1,4 +1,7 @@
-// src/components/exam/shared/SharedSubjectPage.tsx
+﻿// src/components/exam/shared/SharedSubjectPage.tsx
+//
+// Shared subject dashboard. Shows CustomExamBuilder + list of batches.
+// Used by both pre-clinical and clinical routes.
 
 import Link from 'next/link'
 import { ChevronRight } from 'lucide-react'
@@ -8,7 +11,7 @@ import CustomExamBuilder from '@/components/exam/CustomExamBuilder'
 interface Props {
   subjectId: string
   subjectName: string
-  basePath: string
+  basePath: string                     // e.g. /first-year/basic/first-semester/anatomy
   breadcrumbs: { label: string; href?: string }[]
 }
 
