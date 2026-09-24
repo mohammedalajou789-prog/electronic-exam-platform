@@ -1,33 +1,27 @@
-import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
-import {
-  BookOpen, FlaskConical, Microscope,
-  Stethoscope, Heart, GraduationCap,
-} from 'lucide-react'
-
-const YEAR_ICONS = [BookOpen, FlaskConical, Microscope, Stethoscope, Heart, GraduationCap]
-const YEAR_STAGE = ['Pre-Clinical', 'Pre-Clinical', 'Pre-Clinical', 'Clinical', 'Clinical', 'Clinical']
+import AcademicYearsSection from '@/components/shared/AcademicYearsSection'
 
 export default async function HomePage() {
   const supabase = await createServerSupabaseClient()
 
+  const { data: { user } } = await supabase.auth.getUser()
+  if (user) {
+    redirect('/dashboard')
+  }
+
   const [yearsRes, subjectsRes, examsRes, doctorsRes] = await Promise.all([
-    supabase.from('academic_years').select('id, name, display_order').order('display_order'),
+    supabase.from('academic_years').select('id', { count: 'exact', head: true }),
     supabase.from('subjects').select('id', { count: 'exact', head: true }),
     supabase.from('exams').select('id', { count: 'exact', head: true }),
     supabase.from('doctors').select('id', { count: 'exact', head: true }),
   ])
 
-  const academicYears = yearsRes.data ?? []
-  const totalSubjects = subjectsRes.count ?? 0
-  const totalExams    = examsRes.count ?? 0
-  const totalDoctors  = doctorsRes.count ?? 0
-
   const stats = [
-    { value: academicYears.length, label: 'Years'    },
-    { value: totalSubjects,        label: 'Subjects' },
-    { value: totalExams,           label: 'Exams'    },
-    { value: totalDoctors,         label: 'Doctors'  },
+    { value: yearsRes.count ?? 0,    label: 'Years'    },
+    { value: subjectsRes.count ?? 0, label: 'Subjects' },
+    { value: examsRes.count ?? 0,    label: 'Exams'    },
+    { value: doctorsRes.count ?? 0,  label: 'Doctors'  },
   ]
 
   return (
@@ -35,15 +29,6 @@ export default async function HomePage() {
       <style>{`
         @keyframes floatY { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)} }
         @keyframes glow   { 0%,100%{opacity:.55} 50%{opacity:.9} }
-
-        .year-card-new {
-          display:flex; align-items:center; gap:14px;
-          background:var(--bg-elev); border:1px solid var(--bd);
-          border-radius:16px; padding:18px 20px; cursor:pointer;
-          text-decoration:none; color:inherit;
-          transition:transform 0.2s, box-shadow 0.2s;
-        }
-        .year-card-new:hover { transform:translateY(-2px); box-shadow:0 8px 24px var(--shadow); }
 
         .btn-primary {
           text-decoration:none; color:#fff; font-weight:700; font-size:15px;
@@ -87,14 +72,9 @@ export default async function HomePage() {
           animation:floatY 6s ease-in-out 1s infinite;
         }
 
-        /* Years — desktop: 3 cols */
-        .years-section { padding:40px 40px 60px; }
-        .years-grid    { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
-
         /* ── Mobile ── */
         @media (max-width: 768px) {
           .hero-section  { padding: 28px 18px 32px; }
-          .years-section { padding: 28px 18px 48px; }
 
           /* Hide entire logo column on mobile */
           .hero-logo-col { display: none !important; }
@@ -115,10 +95,6 @@ export default async function HomePage() {
           /* CTA */
           .cta-row { gap:10px; margin-bottom:20px; }
           .btn-primary, .btn-secondary { font-size:14px; padding:11px 20px; }
-
-          /* Years — 2 columns on mobile (3+3) */
-          .years-grid    { grid-template-columns:1fr 1fr; gap:10px; }
-          .year-card-new { padding:13px 14px; border-radius:14px; gap:10px; }
         }
 
         @media (max-width: 400px) {
@@ -187,42 +163,7 @@ export default async function HomePage() {
       </section>
 
       {/* ── Academic Years ── */}
-      <section id="years" className="years-section" style={{ background:'var(--bg)' }}>
-        <div style={{ maxWidth:1280, margin:'0 auto' }}>
-          <div style={{ marginBottom:20 }}>
-            <h2 style={{ fontSize:22, fontWeight:800, margin:'0 0 4px' }}>Academic Years</h2>
-            <p style={{ fontSize:14, color:'var(--fg-muted)', margin:0 }}>Pick your year to get started</p>
-          </div>
-
-          {academicYears.length > 0 ? (
-            <div className="years-grid">
-              {academicYears.map((year, index) => {
-                const Icon  = YEAR_ICONS[index % YEAR_ICONS.length]
-                const stage = YEAR_STAGE[index] ?? 'Clinical'
-                const slug  = year.name.toLowerCase().replace(/\s+/g, '-')
-                return (
-                  <Link key={year.id} href={`/${encodeURIComponent(slug)}`} className="year-card-new">
-                    <div style={{ width:44, height:44, flexShrink:0, borderRadius:12, background:'rgba(196,18,48,0.12)', display:'flex', alignItems:'center', justifyContent:'center', color:'#c41230' }}>
-                      <Icon size={20} strokeWidth={1.8} />
-                    </div>
-                    <div style={{ flex:'1 1 0', minWidth:0 }}>
-                      <div style={{ fontWeight:700, fontSize:14.5, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{year.name}</div>
-                      <div style={{ fontSize:12, color:'var(--clr-primary)', fontWeight:600, marginTop:2 }}>{stage}</div>
-                    </div>
-                    <span style={{ color:'var(--fg-muted)', fontSize:18, flexShrink:0 }}>›</span>
-                  </Link>
-                )
-              })}
-            </div>
-          ) : (
-            <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', borderRadius:18, border:'1px dashed #f0dfdc', padding:'64px 24px', textAlign:'center' }}>
-              <GraduationCap size={48} style={{ marginBottom:16, opacity:0.5, color:'var(--fg-muted)' }} />
-              <h3 style={{ margin:'0 0 8px', fontSize:17, fontWeight:700 }}>No academic years available</h3>
-              <p style={{ margin:0, fontSize:14, color:'var(--fg-muted)' }}>Content will appear here once it is added by an administrator.</p>
-            </div>
-          )}
-        </div>
-      </section>
+      <AcademicYearsSection />
     </div>
   )
 }

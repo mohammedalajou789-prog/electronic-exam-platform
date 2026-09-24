@@ -3,6 +3,7 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import EndSessionButton from '@/components/dashboard/EndSessionButton'
+import AcademicYearsSection from '@/components/shared/AcademicYearsSection'
 import { dismissStudyTip } from '@/app/actions/dismiss-study-tip'
 
 // ── Data fetching ──────────────────────────────────────────────────────────────
@@ -207,13 +208,13 @@ export default async function DashboardPage() {
             </h1>
             <p style={{ margin: 0, fontSize: 14, color: 'var(--fg-muted)' }}>Your personal study dashboard</p>
           </div>
-          <Link href="/" style={{
+          <a href="#years" style={{
             padding: '11px 20px', borderRadius: 12,
             border: '1px solid var(--bd)', background: 'var(--bg-soft)',
             color: 'var(--fg)', fontSize: 14, fontWeight: 700, textDecoration: 'none',
           }}>
             Browse Exams
-          </Link>
+          </a>
         </div>
 
         {/* ── Stats row ───────────────────────────────────────────────────── */}
@@ -542,6 +543,11 @@ export default async function DashboardPage() {
         )}
 
       </main>
+
+      <AcademicYearsSection
+        title="Browse Exams"
+        subtitle="Pick a year to explore its subjects and exams"
+      />
     </div>
   )
 }
