@@ -1,8 +1,20 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+const SUPER_ADMIN_ONLY_PATHS = [
+  '/admin/administrators',
+  '/api/admin/create-admin',
+  '/api/admin/delete-admin',
+  '/api/admin/list-admins',
+]
+
 export async function proxy(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request })
+  const supabaseResponse = NextResponse.next({ request })
+  const pathname = request.nextUrl.pathname
+
+  if (pathname === '/admin/login') {
+    return supabaseResponse
+  }
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -23,40 +35,47 @@ export async function proxy(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  const pathname = request.nextUrl.pathname
+  const isAdminArea = pathname.startsWith('/admin') || pathname.startsWith('/api/admin')
 
-  // Allow admin login page without authentication
-  if (pathname === '/admin/login') {
-    return supabaseResponse
-  }
-
-  // Protect /admin routes
-  if (pathname.startsWith('/admin')) {
+  if (isAdminArea) {
     if (!user) {
-      return NextResponse.redirect(new URL('/login/admin', request.url))
+      return denyAdmin(request, pathname)
     }
 
     const { data: admin } = await supabase
       .from('admins')
       .select('role')
-      .eq('id', user.id)
-      .single()
+      .or(`id.eq.${user.id},user_id.eq.${user.id}`)
+      .maybeSingle()
 
-    if (!admin) {
-      return NextResponse.redirect(new URL('/login/admin', request.url))
+    if (!admin?.role) {
+      return denyAdmin(request, pathname)
+    }
+
+    const needsSuperAdmin = SUPER_ADMIN_ONLY_PATHS.some(p => pathname.startsWith(p))
+
+    if (needsSuperAdmin && admin.role !== 'super_admin') {
+      if (pathname.startsWith('/api/')) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+      return NextResponse.redirect(new URL('/admin', request.url))
     }
   }
 
-  // Protect /dashboard routes
-  if (pathname.startsWith('/dashboard')) {
-    if (!user) {
-      return NextResponse.redirect(new URL('/login', request.url))
-    }
+  if (pathname.startsWith('/dashboard') && !user) {
+    return NextResponse.redirect(new URL('/login', request.url))
   }
 
   return supabaseResponse
 }
 
+function denyAdmin(request: NextRequest, pathname: string) {
+  if (pathname.startsWith('/api/')) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  return NextResponse.redirect(new URL('/login/admin', request.url))
+}
+
 export const config = {
-  matcher: ['/admin/:path*', '/dashboard/:path*'],
+  matcher: ['/admin/:path*', '/api/admin/:path*', '/dashboard/:path*'],
 }

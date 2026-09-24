@@ -1,36 +1,42 @@
 ﻿export const runtime = 'nodejs'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
+import { requireSuperAdmin } from '@/lib/auth/requireSuperAdmin'
+
+const ASSIGNABLE_ROLES = ['admin', 'leader'] as const
 
 export async function POST(req: Request) {
   try {
-    const supabase = await createServerSupabaseClient()
-
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-    // ✅ Fix: search by user_id not id
-    const { data: currentAdmin } = await supabase
-      .from('admins').select('role').eq('user_id', user.id).single()
-
-    if (!currentAdmin || currentAdmin.role !== 'super_admin') {
-      return NextResponse.json({ error: 'Only Super Admins can create new admins.' }, { status: 403 })
+    const auth = await requireSuperAdmin()
+    if (!auth.ok) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status })
     }
 
     const body = await req.json()
     const { display_name, email, phone, batch, password, role } = body
 
-    // ✅ Fix: log what we received to debug
-    console.log('Received body:', { display_name, email, phone, batch, role })
-
     if (!display_name || !email || !password) {
-      return NextResponse.json({ 
-        error: 'Name, email, and password are required.',
-        received: { display_name, email, password: !!password }
-      }, { status: 400 })
+      return NextResponse.json(
+        { error: 'Name, email, and password are required.' },
+        { status: 400 }
+      )
     }
 
-    const { createClient } = await import('@supabase/supabase-js')
+    if (typeof password !== 'string' || password.length < 8) {
+      return NextResponse.json(
+        { error: 'Password must be at least 8 characters.' },
+        { status: 400 }
+      )
+    }
+
+    const requestedRole = role || 'admin'
+    if (!ASSIGNABLE_ROLES.includes(requestedRole)) {
+      return NextResponse.json(
+        { error: 'Super Admin accounts must be assigned directly in Supabase.' },
+        { status: 400 }
+      )
+    }
+
     const adminClient = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -45,7 +51,10 @@ export async function POST(req: Request) {
     })
 
     if (createError || !newUser.user) {
-      return NextResponse.json({ error: createError?.message || 'Failed to create user.' }, { status: 400 })
+      return NextResponse.json(
+        { error: createError?.message || 'Failed to create user.' },
+        { status: 400 }
+      )
     }
 
     const newUserId = newUser.user.id
@@ -57,18 +66,17 @@ export async function POST(req: Request) {
       email,
       phone: phone || null,
       batch: batch || null,
-      role: role || 'admin',
+      role: requestedRole,
     })
 
     if (adminError) {
       await adminClient.auth.admin.deleteUser(newUserId)
-      return NextResponse.json({ error: adminError.message }, { status: 400 })
+      return NextResponse.json({ error: 'Failed to create administrator.' }, { status: 400 })
     }
 
     return NextResponse.json({ success: true })
 
-  } catch (err) {
-    console.error('Create admin error:', err)
+  } catch {
     return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
   }
 }

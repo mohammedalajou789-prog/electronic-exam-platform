@@ -1,6 +1,7 @@
 ﻿export const runtime = 'nodejs'
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { requireSuperAdmin } from '@/lib/auth/requireSuperAdmin'
 
 const adminSupabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -9,23 +10,25 @@ const adminSupabase = createClient(
 
 export async function GET() {
   try {
-    // Get all auth users
-    const { data: authData, error: authError } = await adminSupabase.auth.admin.listUsers()
-    if (authError) {
-      return NextResponse.json({ error: authError.message }, { status: 500 })
+    const auth = await requireSuperAdmin()
+    if (!auth.ok) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status })
     }
 
-    // Get all admin records
+    const { data: authData, error: authError } = await adminSupabase.auth.admin.listUsers()
+    if (authError) {
+      return NextResponse.json({ error: 'Failed to load administrators' }, { status: 500 })
+    }
+
     const { data: adminRecords, error: adminError } = await adminSupabase
       .from('admins')
       .select('*')
       .order('created_at', { ascending: false })
 
     if (adminError) {
-      return NextResponse.json({ error: adminError.message }, { status: 500 })
+      return NextResponse.json({ error: 'Failed to load administrators' }, { status: 500 })
     }
 
-    // Merge auth users with admin records
     const admins = (adminRecords || []).map(a => {
       const authUser = (authData?.users || []).find(u => u.id === a.id)
       return {
@@ -40,8 +43,7 @@ export async function GET() {
 
     return NextResponse.json({ admins })
 
-  } catch (error) {
-    console.error('List admins error:', error)
+  } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

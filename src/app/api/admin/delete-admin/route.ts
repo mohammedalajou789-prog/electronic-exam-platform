@@ -1,7 +1,7 @@
 ﻿export const runtime = 'nodejs'
 import { NextRequest, NextResponse } from 'next/server'
-
 import { createClient } from '@supabase/supabase-js'
+import { requireSuperAdmin } from '@/lib/auth/requireSuperAdmin'
 
 const adminSupabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -10,33 +10,35 @@ const adminSupabase = createClient(
 
 export async function DELETE(request: NextRequest) {
   try {
+    const auth = await requireSuperAdmin()
+    if (!auth.ok) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status })
+    }
+
     const { adminId } = await request.json()
 
-    if (!adminId) {
+    if (!adminId || typeof adminId !== 'string') {
       return NextResponse.json({ error: 'adminId is required' }, { status: 400 })
     }
 
-    // Verify caller is super_admin
-    const authHeader = request.headers.get('Authorization')
-    const token = authHeader?.replace('Bearer ', '')
-    if (token) {
-      const { data: { user } } = await adminSupabase.auth.getUser(token)
-      if (user) {
-        const { data: caller } = await adminSupabase
-          .from('admins').select('role').eq('user_id', user.id).single()
-        if (caller?.role !== 'super_admin') {
-          return NextResponse.json({ error: 'Only Super Admins can delete admins.' }, { status: 403 })
-        }
-      }
+    if (adminId === auth.userId) {
+      return NextResponse.json(
+        { error: 'You cannot delete your own account.' },
+        { status: 400 }
+      )
     }
 
-    const { data: admin } = await adminSupabase
+    const { data: target } = await adminSupabase
       .from('admins')
       .select('role')
       .eq('id', adminId)
-      .single()
+      .maybeSingle()
 
-    if (admin?.role === 'super_admin') {
+    if (!target) {
+      return NextResponse.json({ error: 'Administrator not found' }, { status: 404 })
+    }
+
+    if (target.role === 'super_admin') {
       return NextResponse.json(
         { error: 'Cannot delete a Super Admin account' },
         { status: 403 }
@@ -48,8 +50,7 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({ success: true })
 
-  } catch (error) {
-    console.error('Delete admin error:', error)
+  } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
