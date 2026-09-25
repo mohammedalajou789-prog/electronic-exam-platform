@@ -1,4 +1,4 @@
-// src/components/exam/shared/SharedPlayPage.tsx
+﻿// src/components/exam/shared/SharedPlayPage.tsx
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
@@ -46,6 +46,8 @@ export default async function SharedPlayPage({ examId, customExamId, resume }: P
         exam={fakeExam as any}
         questions={questions as any}
         savedProgress={null}
+        target={{ examId: null, customExamId: customExam.id }}
+        resume={false}
       />
     )
   }
@@ -61,6 +63,7 @@ export default async function SharedPlayPage({ examId, customExamId, resume }: P
       batch:batches(name, subject:subjects(name))
     `)
     .eq('id', examId)
+    .eq('status', 'published')
     .is('deleted_at', null)
     .single()
 
@@ -73,40 +76,35 @@ export default async function SharedPlayPage({ examId, customExamId, resume }: P
     .is('deleted_at', null)
     .order('question_order', { ascending: true })
 
-  // ── Saved Progress ────────────────────────────────────────
+  // ── Saved Progress (only when the student pressed "Continue") ─────────────
+  // Starting over is handled by the exam screen itself, so simply opening
+  // this page never deletes anything.
+  const isResume = resume === 'true'
   const { data: { user } } = await supabase.auth.getUser()
 
   let savedProgress: {
     current_question: number
     answers_json: Record<string, string>
     flags_json: string[]
-    remaining_time: number | null
+    elapsed_seconds: number | null
   } | null = null
 
-  if (user) {
-    if (resume === 'true') {
-      const { data } = await supabase
-        .from('study_progress')
-        .select('current_question, answers_json, flags_json, remaining_time')
-        .eq('user_id', user.id)
-        .eq('exam_id', examId)
-        .eq('completed', false)
-        .maybeSingle()
+  if (user && isResume) {
+    const { data } = await supabase
+      .from('study_progress')
+      .select('current_question, answers_json, flags_json, elapsed_seconds')
+      .eq('user_id', user.id)
+      .eq('exam_id', examId)
+      .eq('completed', false)
+      .maybeSingle()
 
-      if (data && Object.keys(data.answers_json || {}).length > 0) {
-        savedProgress = {
-          current_question: data.current_question ?? 0,
-          answers_json: data.answers_json ?? {},
-          flags_json: data.flags_json ?? [],
-          remaining_time: data.remaining_time ?? null,
-        }
+    if (data && Object.keys(data.answers_json || {}).length > 0) {
+      savedProgress = {
+        current_question: data.current_question ?? 0,
+        answers_json: data.answers_json ?? {},
+        flags_json: data.flags_json ?? [],
+        elapsed_seconds: data.elapsed_seconds ?? null,
       }
-    } else {
-      await supabase
-        .from('study_progress')
-        .delete()
-        .eq('user_id', user.id)
-        .eq('exam_id', examId)
     }
   }
 
@@ -115,6 +113,8 @@ export default async function SharedPlayPage({ examId, customExamId, resume }: P
       exam={exam as any}
       questions={(questions || []) as any}
       savedProgress={savedProgress}
+      target={{ examId, customExamId: null }}
+      resume={isResume}
       subjectName={(exam as any).batch?.subject?.name ?? ''}
       batchName={(exam as any).batch?.name ?? ''}
     />

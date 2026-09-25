@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -173,7 +173,7 @@ export interface StudyProgress {
   user_id: string
   exam_id: string
   current_question: number
-  remaining_time: number | null
+  elapsed_seconds: number | null
   answers_json: Record<string, string>
   flags_json: string[]
   completed: boolean

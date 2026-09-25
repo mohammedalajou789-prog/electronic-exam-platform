@@ -1,4 +1,4 @@
-import { createServerClient } from '@supabase/ssr'
+﻿import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 const SUPER_ADMIN_ONLY_PATHS = [
@@ -9,7 +9,7 @@ const SUPER_ADMIN_ONLY_PATHS = [
 ]
 
 export async function proxy(request: NextRequest) {
-  const supabaseResponse = NextResponse.next({ request })
+  let supabaseResponse = NextResponse.next({ request })
   const pathname = request.nextUrl.pathname
 
   if (pathname === '/admin/login') {
@@ -25,6 +25,9 @@ export async function proxy(request: NextRequest) {
           return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
+          // Pass refreshed session cookies to both the page and the browser
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
+          supabaseResponse = NextResponse.next({ request })
           cookiesToSet.forEach(({ name, value, options }) => {
             supabaseResponse.cookies.set(name, value, options)
           })
@@ -33,19 +36,22 @@ export async function proxy(request: NextRequest) {
     }
   )
 
-  const { data: { user } } = await supabase.auth.getUser()
+  // Verifies the session locally with the project's public signing key.
+  // With asymmetric JWT signing keys this needs no network call (much faster than getUser).
+  const { data: claimsData } = await supabase.auth.getClaims()
+  const userId = typeof claimsData?.claims?.sub === 'string' ? claimsData.claims.sub : null
 
   const isAdminArea = pathname.startsWith('/admin') || pathname.startsWith('/api/admin')
 
   if (isAdminArea) {
-    if (!user) {
+    if (!userId) {
       return denyAdmin(request, pathname)
     }
 
     const { data: admin } = await supabase
       .from('admins')
       .select('role')
-      .or(`id.eq.${user.id},user_id.eq.${user.id}`)
+      .or(`id.eq.${userId},user_id.eq.${userId}`)
       .maybeSingle()
 
     if (!admin?.role) {
@@ -62,7 +68,7 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  if (pathname.startsWith('/dashboard') && !user) {
+  if (pathname.startsWith('/dashboard') && !userId) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 

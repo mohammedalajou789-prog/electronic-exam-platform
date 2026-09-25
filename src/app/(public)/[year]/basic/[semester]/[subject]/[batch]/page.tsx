@@ -1,13 +1,6 @@
-import { notFound } from 'next/navigation'
+﻿import { notFound } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import SharedBatchPage from '@/components/exam/shared/SharedBatchPage'
-
-function slugToName(s: string) {
-  return s.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')
-}
-function nameToSlug(s: string) {
-  return s.toLowerCase().replace(/\s+/g, '-')
-}
 
 interface PageProps {
   params: Promise<{ year: string; semester: string; subject: string; batch: string }>
@@ -20,7 +13,7 @@ export default async function BasicBatchPage({ params }: PageProps) {
   const { data: academicYear } = await supabase
     .from('academic_years')
     .select('id, name, is_clinical')
-    .eq('name', slugToName(yearSlug))
+    .eq('slug', yearSlug)
     .single()
 
   if (!academicYear || academicYear.is_clinical) notFound()
@@ -29,25 +22,27 @@ export default async function BasicBatchPage({ params }: PageProps) {
     .from('semesters')
     .select('id, name')
     .eq('academic_year_id', academicYear.id)
-    .eq('name', slugToName(semSlug))
+    .eq('slug', semSlug)
     .single()
 
   if (!semesterData) notFound()
 
-  const { data: allSubjects } = await supabase
+  const { data: subject } = await supabase
     .from('subjects')
     .select('id, name')
     .eq('semester_id', semesterData.id)
+    .eq('slug', subSlug)
+    .maybeSingle()
 
-  const subject = allSubjects?.find((s: any) => nameToSlug(s.name) === subSlug)
   if (!subject) notFound()
 
-  const { data: allBatches } = await supabase
+  const { data: batch } = await supabase
     .from('batches')
     .select('id, name')
     .eq('subject_id', subject.id)
+    .eq('slug', batchSlug)
+    .maybeSingle()
 
-  const batch = allBatches?.find((b: any) => nameToSlug(b.name) === batchSlug)
   if (!batch) notFound()
 
   return (

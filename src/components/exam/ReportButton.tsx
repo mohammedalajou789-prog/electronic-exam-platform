@@ -1,22 +1,20 @@
 ﻿'use client'
+// src/components/exam/ReportButton.tsx
+//
+// "Report Issue" button with its dialog. Reports are sent through the
+// submit_report database function, which links the report to the signed-in
+// student automatically and prevents duplicates and spam.
 
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import {
+  REPORT_CATEGORIES,
+  MAX_REPORT_DESCRIPTION_LENGTH,
+  submitReport,
+} from '@/features/exam-engine/question-actions'
 
 interface Props {
   questionId: string
 }
-
-const categories = [
-  { value: 'wrong_answer', label: 'Wrong Answer' },
-  { value: 'typo', label: 'Typo or Spelling Error' },
-  { value: 'wrong_explanation', label: 'Wrong Explanation' },
-  { value: 'missing_image', label: 'Missing Image' },
-  { value: 'wrong_image', label: 'Wrong Image' },
-  { value: 'wrong_chapter', label: 'Wrong Chapter' },
-  { value: 'duplicate', label: 'Duplicate Question' },
-  { value: 'other', label: 'Other' },
-]
 
 export default function ReportButton({ questionId }: Props) {
   const [isOpen, setIsOpen] = useState(false)
@@ -24,32 +22,34 @@ export default function ReportButton({ questionId }: Props) {
   const [description, setDescription] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isDone, setIsDone] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  async function handleSubmit() {
-    if (!category) return
+  async function handleSubmit(): Promise<void> {
+    if (!category || isSubmitting) return
     setIsSubmitting(true)
-    const supabase = createClient()
-    await supabase.from('reports').insert({
-      question_id: questionId,
-      category,
-      description: description.trim() || null,
-      status: 'new',
-    })
-    setIsDone(true)
-    setIsSubmitting(false)
-    setTimeout(() => {
-      setIsOpen(false)
-      setIsDone(false)
-      setCategory('')
-      setDescription('')
-    }, 2000)
+    setErrorMessage(null)
+    try {
+      await submitReport(questionId, category, description)
+      setIsDone(true)
+      setTimeout(() => {
+        setIsOpen(false)
+        setIsDone(false)
+        setCategory('')
+        setDescription('')
+      }, 2000)
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Could not send the report. Please try again.')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
-  function handleClose() {
+  function handleClose(): void {
     setIsOpen(false)
     setCategory('')
     setDescription('')
     setIsDone(false)
+    setErrorMessage(null)
   }
 
   return (
@@ -89,6 +89,9 @@ export default function ReportButton({ questionId }: Props) {
             }}
           />
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Report an issue"
             style={{
               position: 'fixed',
               top: '50%', left: '50%',
@@ -123,6 +126,7 @@ export default function ReportButton({ questionId }: Props) {
                   <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--fg)' }}>Report an Issue</div>
                   <button
                     onClick={handleClose}
+                    aria-label="Close"
                     style={{
                       width: 30, height: 30, borderRadius: 9,
                       border: '1px solid var(--border)',
@@ -137,8 +141,9 @@ export default function ReportButton({ questionId }: Props) {
                   </button>
                 </div>
 
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>Issue Type</div>
+                <label htmlFor="report-category" style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>Issue Type</label>
                 <select
+                  id="report-category"
                   value={category}
                   onChange={e => setCategory(e.target.value)}
                   style={{
@@ -149,24 +154,32 @@ export default function ReportButton({ questionId }: Props) {
                   }}
                 >
                   <option value="">Select issue type</option>
-                  {categories.map(c => (
+                  {REPORT_CATEGORIES.map(c => (
                     <option key={c.value} value={c.value}>{c.label}</option>
                   ))}
                 </select>
 
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>Description (Optional)</div>
+                <label htmlFor="report-description" style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>Description (Optional)</label>
                 <textarea
+                  id="report-description"
                   value={description}
                   onChange={e => setDescription(e.target.value)}
+                  maxLength={MAX_REPORT_DESCRIPTION_LENGTH}
                   placeholder="Describe the issue..."
                   style={{
                     width: '100%', minHeight: 84, padding: '11px 12px',
                     borderRadius: 11, border: '1px solid var(--border)',
                     background: 'var(--bg-soft)', color: 'var(--fg)',
                     fontSize: 14, fontFamily: 'inherit', resize: 'vertical',
-                    marginBottom: 18, outline: 'none',
+                    marginBottom: errorMessage ? 10 : 18, outline: 'none',
                   }}
                 />
+
+                {errorMessage && (
+                  <div role="alert" style={{ marginBottom: 14, fontSize: 13, fontWeight: 600, color: '#ef4444' }}>
+                    {errorMessage}
+                  </div>
+                )}
 
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                   <button

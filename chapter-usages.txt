@@ -1,0 +1,164 @@
+﻿.\src\app\(public)\search\page.tsx:64: correct_answer, explanation, chapter, lecture,
+.\src\app\(public)\search\page.tsx:94: q.question_text, q.chapter, q.lecture, q.correct_answer, q.explanation,
+.\src\app\actions\compute-study-tip.ts:39: lecture: string
+.\src\app\actions\compute-study-tip.ts:46: chapter: string
+.\src\app\actions\compute-study-tip.ts:61: chapter: string
+.\src\app\actions\compute-study-tip.ts:66: lectures: { lecture: string; lectureId: string; wrong_count: number; total_count: number }[]
+.\src\app\actions\compute-study-tip.ts:89: chapter: ch.chapter,
+.\src\app\actions\compute-study-tip.ts:99: lecture: l.lecture,
+.\src\app\actions\compute-study-tip.ts:113: const lectureNames = ch.lectures.map(l => l.lecture).join(', ')
+.\src\app\actions\compute-study-tip.ts:114: return `${ch.chapter} (${pct}%) — ${lectureNames}`
+.\src\app\actions\compute-study-tip.ts:116: return `${ch.chapter} (${pct}%)`
+.\src\app\admin\content\page.tsx:388: const chapter = subject?.chapters.find(c => c.id === chapterId)
+.\src\app\admin\content\page.tsx:389: if (!subject || !chapter) return
+.\src\app\admin\content\page.tsx:400: .eq('chapter', chapter.name)
+.\src\app\admin\content\page.tsx:405: showToast(`Cannot delete: ${usedCount} question(s) are tagged with this chapter.`, 'error')
+.\src\app\admin\content\page.tsx:409: if (!confirm('Delete this chapter and all its lectures?')) return
+.\src\app\admin\content\page.tsx:423: const chapter = subject?.chapters.find(c => c.id === chapterId)
+.\src\app\admin\content\page.tsx:424: const order = (chapter?.lectures?.length || 0) + 1
+.\src\app\admin\content\page.tsx:432: const chapter = subject?.chapters.find(c => c.lectures.some(l => l.id === lectureId))
+.\src\app\admin\content\page.tsx:433: const lecture = chapter?.lectures.find(l => l.id === lectureId)
+.\src\app\admin\content\page.tsx:434: if (!subject || !lecture) return
+.\src\app\admin\content\page.tsx:445: .eq('lecture', lecture.name)
+.\src\app\admin\content\page.tsx:450: showToast(`Cannot delete: ${usedCount} question(s) are tagged with this lecture.`, 'error')
+.\src\app\admin\content\page.tsx:454: if (!confirm('Delete this lecture?')) return
+.\src\app\admin\content\page.tsx:781: {/* Add chapter row */}
+.\src\app\admin\content\page.tsx:785: placeholder="New chapter name (e.g. Cardiovascular System)"
+.\src\app\admin\content\page.tsx:798: {/* Add lecture row */}
+.\src\app\admin\content\page.tsx:806: <option value="">Select chapter to add lecture</option>
+.\src\app\admin\content\page.tsx:832: {subject.chapters.sort((a, b) => a.display_order - b.display_order).map(chapter => (
+.\src\app\admin\content\page.tsx:833: <div key={chapter.id} style={{ border: '1px solid var(--bd)', borderRadius: 12, overflow: 'hidden' }}>
+.\src\app\admin\content\page.tsx:838: <span style={{ fontWeight: 700, fontSize: 13 }}>{chapter.name}</span>
+.\src\app\admin\content\page.tsx:841: {chapter.lectures?.length || 0} lectures
+.\src\app\admin\content\page.tsx:844: onClick={() => deleteChapter(chapter.id)}
+.\src\app\admin\content\page.tsx:853: {(chapter.lectures || []).length > 0 && (
+.\src\app\admin\content\page.tsx:855: {chapter.lectures.sort((a, b) => a.display_order - b.display_order).map((lecture, idx) => (
+.\src\app\admin\content\page.tsx:856: <li key={lecture.id} style={{
+.\src\app\admin\content\page.tsx:861: <span style={{ fontSize: 12.5, color: 'var(--fg-muted)' }}>{lecture.name}</span>
+.\src\app\admin\content\page.tsx:863: onClick={() => deleteLecture(lecture.id)}
+:319: {/* Question text + chapter · lecture */}
+:382: <option value="">No chapter</option>
+:396: <option value="">No lecture</option>
+.\src\app\admin\import\page.tsx:150: const chapter = allChapters.find(c => c.subject_id === subjectId && c.name.toLowerCase().trim() === chapterLower)
+.\src\app\admin\import\page.tsx:151: if (chapter) {
+.\src\app\admin\import\page.tsx:152: const validLectureNames = allLectures.filter(l => l.chapter_id === chapter.id).map(l => l.name.toLowerCase().trim())
+.\src\app\admin\import\page.tsx:154: const chapterLectures = allLectures.filter(l => l.chapter_id === chapter.id).map(l => l.name)
+.\src\app\admin\import\page.tsx:346: const lecturesSection = Object.entries(lecturesByChapter).map(([chapter, lectures]) =>
+.\src\app\admin\import\page.tsx:347: `  ${chapter}:\n${lectures.map(l => `    ${l.num}. ${l.name}`).join('\n')}`
+.\src\app\admin\import\page.tsx:363: // Build assignment map: doctorName → lecture nums
+.\src\app\admin\import\page.tsx:381: doctorInstruction = `Each doctor teaches specific lectures. Assign the Doctor field based on the lecture number.
+.\src\app\admin\import\page.tsx:387: doctorRule = `8. Assign the "Doctor:" field based on the lecture number and the assignments above. If a lecture has no assigned doctor, omit the Doctor line entirely for that question.`
+.\src\app\admin\import\page.tsx:454: 2. Use EXACT chapter and lecture names — spelling must match the list above perfectly
+.\src\app\admin\import\page.tsx:455: 3. Every question requires: question text, at least 4 choices (A–D), correct answer marked with *, chapter, lecture, explanation
+.\src\app\admin\import\page.tsx:456: 4. The Doctor field is required only when a doctor is assigned to that lecture (see DOCTORS section above)
+.\src\app\admin\import\page.tsx:463: a. ALWAYS prefer an EXISTING chapter from the list above. Only create a brand-new chapter when the topic genuinely does not belong under any existing chapter (a new chapter means a whole new subject area — not a specific disease, condition, or subtopic).
+.\src\app\admin\import\page.tsx:464: b. If the topic is a specific disease/condition/subtopic that logically fits inside an existing chapter (example: "Congenital Heart Disease" belongs as a LECTURE under an existing "Cardiology" chapter — it is NOT its own chapter), you must use that existing chapter and, if needed, add a new LECTURE under it. Do not invent a new chapter for something that is really lecture-level.
+.\src\app\admin\import\page.tsx:465: c. Do not force-fit a question into an existing lecture that does not actually match, just to avoid creating a new one. If no existing lecture under the correct chapter fits, create one — using the full, correctly spelled standard medical name (e.g. "Congenital Heart Disease", never a shortened/misspelled form like "Congenital Heat Dis").
+.\src\app\admin\import\page.tsx:466: d. List every new chapter or lecture you created under "NEW TOPICS ADDED" in the end report, each with a one-line reason why no existing topic fit.
+.\src\app\admin\import\page.tsx:482: (list any new chapter or lecture names you created, or write "None")
+.\src\app\admin\manual-import\page.tsx:556: <span style={{ fontSize:11.5, color:'var(--mi-primary)', opacity:0.7, marginLeft:'auto' }}>No chapters found — questions will be saved without chapter classification.</span>
+.\src\app\admin\manual-import\page.tsx:604: <option value="">No chapter</option>
+.\src\app\admin\manual-import\page.tsx:611: <option value="">No lecture</option>
+.\src\app\api\search\results\route.ts:36: chapter:chapters(id, name),
+.\src\app\api\search\results\route.ts:37: lecture:lectures(id, name),
+.\src\app\api\search\results\route.ts:80: const chapterName = Array.isArray(q.chapter) ? q.chapter[0]?.name : q.chapter?.name
+.\src\app\api\search\results\route.ts:81: const lectureName = Array.isArray(q.lecture) ? q.lecture[0]?.name : q.lecture?.name
+.\src\app\api\search\suggestions\route.ts:42: .select('chapter')
+.\src\app\api\search\suggestions\route.ts:43: .ilike('chapter', pattern)
+.\src\app\api\search\suggestions\route.ts:50: .select('lecture')
+.\src\app\api\search\suggestions\route.ts:51: .ilike('lecture', pattern)
+.\src\app\api\search\suggestions\route.ts:80: (chapters ?? []).map((r: any) => r.chapter).filter(Boolean)
+.\src\app\api\search\suggestions\route.ts:84: (lectures ?? []).map((r: any) => r.lecture).filter(Boolean)
+.\src\app\api\search\suggestions\route.ts:94: suggestions.push({ type: 'chapter', label: ch, icon: '📖' })
+.\src\app\api\search\suggestions\route.ts:97: suggestions.push({ type: 'lecture', label: lec, icon: '📝' })
+.\src\app\dashboard\bookmarks\page.tsx:21: id, question_text, chapter_id, lecture_id, chapter:chapters(id, name), lecture:lectures(id, name),
+.\src\app\dashboard\wrong-questions\page.tsx:22: id, question_text, chapter_id, lecture_id, chapter:chapters(id, name), lecture:lectures(id, name),
+.\src\app\dashboard\wrong-questions\page.tsx:56: const chObj = (w.question as any)?.chapter
+.\src\app\dashboard\wrong-questions\page.tsx:57: const leObj = (w.question as any)?.lecture
+.\src\app\dashboard\wrong-questions\page.tsx:66: .map(([chapter, v]) => ({
+.\src\app\dashboard\wrong-questions\page.tsx:67: chapter,
+.\src\app\dashboard\wrong-questions\page.tsx:106: <div key={cs.chapter} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+.\src\app\dashboard\wrong-questions\page.tsx:108: <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--fg)' }}>{cs.chapter}</span>
+.\src\app\dashboard\page.tsx:78: chapter:chapters(name),
+.\src\app\dashboard\page.tsx:79: lecture:lectures(name),
+.\src\app\dashboard\page.tsx:95: chapter:chapters(name),
+.\src\app\dashboard\page.tsx:139: // ── Weakest chapter (focus area) ──────────────────────────────────────────
+.\src\app\dashboard\page.tsx:141: chapter: string
+.\src\app\dashboard\page.tsx:147: const ch = (w.question as any)?.chapter?.name
+.\src\app\dashboard\page.tsx:148: const lec = (w.question as any)?.lecture?.name
+.\src\app\dashboard\page.tsx:151: if (!chapterMap[ch]) chapterMap[ch] = { chapter: ch, subject: subj, lectures: new Set(), count: 0 }
+.\src\app\dashboard\page.tsx:158: chapter: weakestRaw.chapter,
+.\src\app\dashboard\page.tsx:585: <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--panel-dark-mut)' }}>Your weakest chapter</span>
+.\src\app\dashboard\page.tsx:586: <span style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.15 }}>{weakestChapter.chapter}</span>
+.\src\app\dashboard\page.tsx:611: Solve a few exams and your weakest chapter will show up here.
+.\src\components\admin\QuestionEditor.tsx:257: <option value="">Select chapter...</option>
+.\src\components\admin\QuestionEditor.tsx:272: <option value="">Select lecture...</option>
+.\src\components\dashboard\BookmarksClient.tsx:14: chapter: { id: string; name: string } | null
+.\src\components\dashboard\BookmarksClient.tsx:15: lecture: { id: string; name: string } | null
+.\src\components\dashboard\BookmarksClient.tsx:100: {q.chapter && (
+.\src\components\dashboard\BookmarksClient.tsx:106: {q.chapter.name}
+.\src\components\dashboard\BookmarksClient.tsx:109: {q.lecture && (
+.\src\components\dashboard\BookmarksClient.tsx:114: {q.lecture.name}
+.\src\components\dashboard\WrongQuestionsClient.tsx:18: chapter: { id: string; name: string } | null
+.\src\components\dashboard\WrongQuestionsClient.tsx:19: lecture: { id: string; name: string } | null
+.\src\components\dashboard\WrongQuestionsClient.tsx:104: {q.chapter && (
+.\src\components\dashboard\WrongQuestionsClient.tsx:110: {q.chapter.name}
+.\src\components\dashboard\WrongQuestionsClient.tsx:113: {q.lecture && (
+.\src\components\dashboard\WrongQuestionsClient.tsx:118: {q.lecture.name}
+.\src\components\exam\shared\SharedExamPrepPage.tsx:59: .select('chapter:chapters(id, name)')
+.\src\components\exam\shared\SharedExamPrepPage.tsx:65: const ch = Array.isArray(q.chapter) ? q.chapter[0] : q.chapter
+.\src\components\exam\shared\SharedExamPrepPage.tsx:98: .select('chapter:chapters(id, name)')
+.\src\components\exam\shared\SharedExamPrepPage.tsx:106: const ch = Array.isArray(q.chapter) ? q.chapter[0] : q.chapter
+.\src\components\exam\shared\SharedPdfPage.tsx:18: chapter: { id: string; name: string } | null
+.\src\components\exam\shared\SharedPdfPage.tsx:19: lecture: { id: string; name: string } | null
+.\src\components\exam\shared\SharedPdfPage.tsx:97: chapter:chapters(id, name), lecture:lectures(id, name),
+.\src\components\exam\shared\SharedPdfPage.tsx:107: chapter: Array.isArray(r.chapter) ? r.chapter[0] || null : r.chapter,
+.\src\components\exam\shared\SharedPdfPage.tsx:108: lecture: Array.isArray(r.lecture) ? r.lecture[0] || null : r.lecture,
+.\src\components\exam\shared\SharedPdfPage.tsx:129: chapter:chapters(id, name), lecture:lectures(id, name),
+.\src\components\exam\shared\SharedPdfPage.tsx:138: chapter: Array.isArray(r.chapter) ? r.chapter[0] || null : r.chapter,
+.\src\components\exam\shared\SharedPdfPage.tsx:139: lecture: Array.isArray(r.lecture) ? r.lecture[0] || null : r.lecture,
+.\src\components\exam\shared\SharedPdfPage.tsx:249: {q.chapter && <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: 'color-mix(in srgb, var(--accent-blue) 12%, var(--bg-soft))', color: 'var(--accent-blue)' }}>{q.chapter.name}</span>}
+.\src\components\exam\shared\SharedPdfPage.tsx:250: {q.lecture && <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: 'var(--bg-soft)', color: 'var(--fg-muted)' }}>{q.lecture.name}</span>}
+.\src\components\exam\shared\SharedPlayPage.tsx:30: .select('*, question_images(*), question_statistics(*), chapter:chapters(id, name), lecture:lectures(id, name)')
+.\src\components\exam\shared\SharedPlayPage.tsx:74: .select('*, question_images(*), question_statistics(*), doctor:doctors(name), chapter:chapters(id, name), lecture:lectures(id, name)')
+.\src\components\exam\shared\SharedResultsPage.tsx:72: if (!q.chapter) return acc
+.\src\components\exam\shared\SharedResultsPage.tsx:73: if (!acc[q.chapter]) acc[q.chapter] = { total: 0, correct: 0 }
+.\src\components\exam\shared\SharedResultsPage.tsx:74: acc[q.chapter].total++
+.\src\components\exam\shared\SharedResultsPage.tsx:75: if (answers[q.id] === q.correct_answer) acc[q.chapter].correct++
+.\src\components\exam\shared\SharedResultsPage.tsx:169: <div style={{ fontSize:13.5, fontWeight:700, color:'var(--fg)', marginBottom:10 }}>By chapter</div>
+.\src\components\exam\shared\SharedReviewPage.tsx:29: .select('*, question_statistics(*), chapter:chapters(id, name), lecture:lectures(id, name)')
+.\src\components\exam\shared\SharedReviewPage.tsx:43: .select('*, question_statistics(*), chapter:chapters(id, name), lecture:lectures(id, name)')
+.\src\components\exam\shared\SharedSubjectPage.tsx:59: ? supabase.from('questions').select('chapter_id, lecture_id, chapter:chapters(id, name), lecture:lectures(id, name)').in('exam_id', allExamIds).is('deleted_at', null)
+.\src\components\exam\shared\SharedSubjectPage.tsx:71: const ch = Array.isArray(q.chapter) ? q.chapter[0] : q.chapter
+.\src\components\exam\shared\SharedSubjectPage.tsx:72: const le = Array.isArray(q.lecture) ? q.lecture[0] : q.lecture
+.\src\components\exam\InteractiveExam.tsx:49: chapter: { id: string; name: string } | null
+.\src\components\exam\InteractiveExam.tsx:50: lecture: { id: string; name: string } | null
+.\src\components\exam\InteractiveExam.tsx:766: const ch = q.chapter?.name ?? 'Other'
+.\src\components\exam\InteractiveExam.tsx:771: const chapterStats = Object.entries(byChapter).map(([chapter, v]) => ({
+.\src\components\exam\InteractiveExam.tsx:772: chapter,
+.\src\components\exam\InteractiveExam.tsx:1065: {currentQ.chapter?.name && (
+.\src\components\exam\InteractiveExam.tsx:1077: {currentQ.chapter?.name}
+.\src\components\exam\InteractiveExam.tsx:1080: {currentQ.lecture?.name && (
+.\src\components\exam\InteractiveExam.tsx:1091: {currentQ.lecture?.name}
+.\src\components\exam\InteractiveExam.tsx:2188: <div key={cs.chapter}>
+.\src\components\exam\InteractiveExam.tsx:2198: <span>{cs.chapter}</span>
+.\src\components\exam\InteractiveExam.tsx:2358: {q.chapter?.name && (
+.\src\components\exam\InteractiveExam.tsx:2366: {q.chapter?.name}
+.\src\components\exam\InteractiveExam.tsx:2369: {q.lecture?.name && (
+.\src\components\exam\InteractiveExam.tsx:2377: {q.lecture?.name}
+.\src\components\exam\PDFExport.tsx:18: chapter: { id: string; name: string } | null
+.\src\components\exam\PDFExport.tsx:19: lecture: { id: string; name: string } | null
+.\src\components\exam\ReviewQuestion.tsx:24: chapter: { id: string; name: string } | null
+.\src\components\exam\ReviewQuestion.tsx:25: lecture: { id: string; name: string } | null
+.\src\components\exam\ReviewQuestion.tsx:58: {question.chapter && (
+.\src\components\exam\ReviewQuestion.tsx:64: {question.chapter?.name}
+.\src\components\exam\ReviewQuestion.tsx:67: {question.lecture && (
+.\src\components\exam\ReviewQuestion.tsx:73: {question.lecture?.name}
+.\src\components\search\SearchClient.tsx:390: Type a subject name, chapter, lecture, doctor name, or any keyword from a question.
+.\src\components\search\SearchResults.tsx:150: {q.chapter && (
+.\src\components\search\SearchResults.tsx:156: <Highlight text={typeof q.chapter === 'string' ? q.chapter : q.chapter?.name ?? ''} terms={terms} />
+.\src\components\search\SearchResults.tsx:159: {q.lecture && (
+.\src\components\search\SearchResults.tsx:164: <Highlight text={typeof q.lecture === 'string' ? q.lecture : q.lecture?.name ?? ''} terms={terms} />
+.\src\features\bulk-import\parser.ts:110: warnings.push(`${noChapter.length} question(s) have no chapter assigned.`)
+.\src\types\exam.ts:83: chapter: { id: string; name: string } | null
+.\src\types\exam.ts:84: lecture: { id: string; name: string } | null

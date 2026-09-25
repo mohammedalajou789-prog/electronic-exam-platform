@@ -15,6 +15,7 @@ export default function RegisterPage() {
   const [batch, setBatch] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [loading, setLoading] = useState(false)
   const [batches, setBatches] = useState<string[]>([])
   const router = useRouter()
@@ -28,26 +29,39 @@ export default function RegisterPage() {
       })
   }, [])
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent): Promise<void> {
     e.preventDefault()
     setError('')
+    setNotice('')
     if (password.length < 6) { setError('Password must be at least 6 characters.'); return }
     setLoading(true)
+
     const supabase = createClient()
+
+    // All profile fields are sent with the account itself.
+    // The database trigger (on_auth_user_created) copies them into the users table.
     const { data, error: authError } = await supabase.auth.signUp({
-      email, password,
-      options: { data: { display_name: displayName.trim() } },
+      email: email.trim(),
+      password,
+      options: {
+        data: {
+          display_name: displayName.trim(),
+          university_id: universityId.trim() || null,
+          phone: phone.trim() || null,
+          batch: batch || null,
+        },
+      },
     })
+
     if (authError) { setError(authError.message); setLoading(false); return }
-    if (data.user) {
-      await supabase.from('users').upsert({
-        id: data.user.id, email,
-        display_name: displayName.trim(),
-        university_id: universityId.trim() || null,
-        phone: phone.trim() || null,
-        batch: batch || null,
-      })
+
+    // Email confirmation is required: the student is not signed in yet
+    if (!data.session) {
+      setNotice('Account created. Please check your email to confirm your account, then sign in.')
+      setLoading(false)
+      return
     }
+
     router.push('/dashboard')
     router.refresh()
   }
@@ -208,13 +222,20 @@ export default function RegisterPage() {
               </div>
             )}
 
+            {/* Success notice (email confirmation) */}
+            {notice && (
+              <div style={{ marginBottom: 14, padding: '10px 14px', borderRadius: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#15803d', fontSize: 13, fontWeight: 600 }}>
+                {notice}
+              </div>
+            )}
+
             {/* Submit */}
-            <button type="submit" disabled={loading} style={{
+            <button type="submit" disabled={loading || notice !== ''} style={{
               width: '100%', padding: '12px', borderRadius: 11,
               border: 'none', background: 'var(--clr-primary)', color: '#fff',
               fontFamily: 'inherit', fontSize: 15, fontWeight: 700,
-              cursor: loading ? 'not-allowed' : 'pointer',
-              opacity: loading ? 0.7 : 1, marginBottom: 14,
+              cursor: loading || notice !== '' ? 'not-allowed' : 'pointer',
+              opacity: loading || notice !== '' ? 0.7 : 1, marginBottom: 14,
             }}>
               {loading ? 'Creating account...' : 'Create Account'}
             </button>

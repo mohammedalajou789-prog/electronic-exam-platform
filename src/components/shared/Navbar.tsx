@@ -202,10 +202,12 @@ export default function Navbar() {
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '10px 10px 0' }}>
-          <Link href="/" onClick={closeSidebar} className="sb-link">
-            <Home size={15} style={{ color: 'var(--clr-primary)', flexShrink: 0 }} />
-            Home
-          </Link>
+          {mounted && !user && (
+            <Link href="/" onClick={closeSidebar} className="sb-link">
+              <Home size={15} style={{ color: 'var(--clr-primary)', flexShrink: 0 }} />
+              Home
+            </Link>
+          )}
           {mounted && user && (
             <Link href="/dashboard" onClick={closeSidebar} className="sb-link">
               <LayoutDashboard size={15} style={{ color: 'var(--clr-primary)', flexShrink: 0 }} />
@@ -263,9 +265,11 @@ export default function Navbar() {
 
           {/* Desktop nav */}
           <nav className="nb-desktop" style={{ alignItems: 'center', gap: 4, marginLeft: 8 }}>
-            <Link href="/" style={{ borderRadius: 10, border: '1px solid var(--bd)', padding: '7px 14px', fontSize: 14, fontWeight: 600, color: 'var(--fg)', textDecoration: 'none' }}>Home</Link>
+            {mounted && !user && (
+              <Link href="/" style={{ borderRadius: 10, border: '1px solid var(--bd)', padding: '7px 14px', fontSize: 14, fontWeight: 600, color: 'var(--fg)', textDecoration: 'none' }}>Home</Link>
+            )}
             {mounted && user && (
-              <Link href="/dashboard" style={{ borderRadius: 10, padding: '7px 14px', fontSize: 14, fontWeight: 600, color: 'var(--fg)', textDecoration: 'none' }}>Dashboard</Link>
+              <Link href="/dashboard" style={{ borderRadius: 10, border: '1px solid var(--bd)', padding: '7px 14px', fontSize: 14, fontWeight: 600, color: 'var(--fg)', textDecoration: 'none' }}>Dashboard</Link>
             )}
           </nav>
 

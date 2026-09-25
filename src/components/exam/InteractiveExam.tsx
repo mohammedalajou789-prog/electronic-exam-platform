@@ -1,10 +1,25 @@
-'use client'
+﻿'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { ExplanationRenderer } from '@/components/exam/ExplanationRenderer'
-import { saveExamResults } from '@/app/actions/save-exam-results'
+import {
+  startAttempt,
+  recordAnswer,
+  updateAttemptTime,
+  finishAttempt,
+  type ExamTarget,
+  type AnswerPayload,
+} from '@/features/exam-engine/attempt-client'
+import { refreshStudyTip } from '@/app/actions/compute-study-tip'
+import {
+  REPORT_CATEGORIES,
+  MAX_REPORT_DESCRIPTION_LENGTH,
+  submitReport,
+  loadBookmarkedIds,
+  setBookmark,
+} from '@/features/exam-engine/question-actions'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -47,46 +62,32 @@ interface SavedProgress {
   current_question: number
   answers_json: Record<string, string>
   flags_json: string[]
-  remaining_time: number | null
+  elapsed_seconds: number | null
 }
 interface Props {
   exam: Exam
   questions: Question[]
   savedProgress: SavedProgress | null
+  /** Which exam is being solved: a regular exam or a custom exam. */
+  target: ExamTarget
+  /** True when the student pressed "Continue" (reuse the open attempt). */
+  resume: boolean
   subjectName?: string
   batchName?: string
 }
-
-// ── Theme ─────────────────────────────────────────────────────────────────────
-
-const LIGHT: Record<string, string> = {
-  bg: 'oklch(98% 0.006 55)',
-  'bg-elev': 'oklch(100% 0 0)',
-  'bg-soft': 'oklch(96% 0.009 55)',
-  fg: 'oklch(22% 0.02 50)',
-  'fg-muted': 'oklch(46% 0.02 50)',
-  border: 'oklch(89% 0.012 50)',
-  primary: 'oklch(50% 0.19 25)',
-  'primary-soft': 'oklch(94% 0.035 25)',
-  'accent-green': 'oklch(60% 0.14 145)',
-  'accent-blue': 'oklch(58% 0.13 250)',
-  'accent-purple': 'oklch(56% 0.14 300)',
-  shadow: 'rgba(20,10,10,.08)',
+/** Who is answering, and in which attempt (both null for guests). */
+interface ExamSession {
+  userId: string | null
+  attemptId: string | null
 }
-const DARK: Record<string, string> = {
-  bg: 'oklch(19% 0.014 260)',
-  'bg-elev': 'oklch(24% 0.016 260)',
-  'bg-soft': 'oklch(22% 0.016 260)',
-  fg: 'oklch(92% 0.008 260)',
-  'fg-muted': 'oklch(66% 0.018 260)',
-  border: 'oklch(33% 0.02 260)',
-  primary: 'oklch(66% 0.17 25)',
-  'primary-soft': 'oklch(30% 0.06 25)',
-  'accent-green': 'oklch(68% 0.13 145)',
-  'accent-blue': 'oklch(68% 0.12 250)',
-  'accent-purple': 'oklch(68% 0.13 300)',
-  shadow: 'rgba(0,0,0,.4)',
-}
+
+// ── Motion helpers ──────────────────────────────────────────────────────────
+// Colors and dark mode come from globals.css (html.dark), animations from the
+// shared motion classes in globals.css (a-rise, a-pop, a-fade, a-grow, a-ring…).
+
+/** Stagger index for the shared animation classes (70 ms per step). */
+const stagger = (i: number): React.CSSProperties =>
+  ({ ['--i' as string]: i } as React.CSSProperties)
 
 type Mode = 'play' | 'result' | 'review'
 
@@ -106,7 +107,7 @@ function buildOptions(q: Question, selectedKey: string | null, interactive: bool
     const isCorrect = opt.key === q.correct_answer
     const isWrongSelected = answered && opt.key === selectedKey && !isCorrect
     let bg = 'var(--bg-soft)',
-      border = 'var(--border)',
+      border = 'var(--bd)',
       badgeBg = 'var(--bg-elev)',
       badgeColor = 'var(--fg-muted)',
       badgeContent = opt.key.toUpperCase(),
@@ -145,7 +146,7 @@ function buildOptions(q: Question, selectedKey: string | null, interactive: bool
         color: 'var(--fg)',
         cursor: interactive && !answered ? 'pointer' : 'default',
         opacity,
-        transition: 'background .2s ease,border-color .2s ease,opacity .2s ease',
+        transition: 'background-color .26s var(--ease-out), border-color .26s var(--ease-out), opacity .26s var(--ease-out), transform .26s var(--ease-out)',
       } as React.CSSProperties,
       badgeStyle: {
         width: 26,
@@ -231,15 +232,19 @@ export default function InteractiveExam({
   exam,
   questions,
   savedProgress,
+  target,
+  resume,
   subjectName,
   batchName,
 }: Props) {
   const router = useRouter()
   const prepPath = usePathname().replace(/\/play$/, '')
-  const supabase = createClient()
+  // Created once, so callbacks that depend on it stay stable between renders
+  const [supabase] = useState(() => createClient())
+  const targetExamId = target.examId
+  const targetCustomExamId = target.customExamId
 
   // ── State initialised from savedProgress when resuming ────────────────────
-  const [isDark, setIsDark] = useState(false)
   const [mode, setMode] = useState<Mode>('play')
   const [current, setCurrent] = useState(savedProgress?.current_question ?? 0)
   const [answers, setAnswers] = useState<Record<string, string>>(
@@ -252,9 +257,9 @@ export default function InteractiveExam({
   })
   const [bookmarked, setBookmarked] = useState<Record<string, boolean>>({})
 
-  // Timer starts from saved elapsed time (remaining_time stores elapsed seconds)
+  // Timer starts from saved elapsed time (elapsed_seconds stores elapsed seconds)
   const [secondsElapsed, setSecondsElapsed] = useState(
-    savedProgress?.remaining_time ?? 0
+    savedProgress?.elapsed_seconds ?? 0
   )
 
   const [navOpen, setNavOpen] = useState(false)
@@ -266,6 +271,11 @@ export default function InteractiveExam({
   const [showExplanation, setShowExplanation] = useState(false)
   const [reportType, setReportType] = useState('')
   const [reportDescription, setReportDescription] = useState('')
+  const [reportSending, setReportSending] = useState(false)
+  const [reportError, setReportError] = useState<string | null>(null)
+  // Short message shown at the bottom of the screen (e.g. "Report sent")
+  const [notice, setNotice] = useState<string | null>(null)
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Result state (set after finishing)
   const [finalTimeTaken, setFinalTimeTaken] = useState(0)
@@ -273,7 +283,7 @@ export default function InteractiveExam({
   const [saveError, setSaveError] = useState(false)
 
   // Refs — used inside callbacks to avoid stale closures
-  const secondsRef = useRef(savedProgress?.remaining_time ?? 0)
+  const secondsRef = useRef(savedProgress?.elapsed_seconds ?? 0)
   const answersRef = useRef(savedProgress?.answers_json ?? {})
   const flaggedRef = useRef<Record<string, boolean>>({})
   const currentRef = useRef(savedProgress?.current_question ?? 0)
@@ -283,6 +293,14 @@ export default function InteractiveExam({
   // Cached user id — loaded once on mount so we can use it in beforeunload
   // (beforeunload cannot await async calls reliably)
   const userIdRef = useRef<string | null>(null)
+  // Seconds spent on each question before it was answered (visible tab only)
+  const questionTimeRef = useRef<Record<string, number>>({})
+  // Questions shown on screen in this attempt ("skipped" vs "not reached")
+  const viewedRef = useRef<Set<string>>(new Set())
+  // The attempt session, opened once when the exam loads
+  const sessionPromiseRef = useRef<Promise<ExamSession> | null>(null)
+  const resumeRef = useRef(resume)
+  const isCustomExam = targetCustomExamId !== null
 
   // Keep refs in sync with state
   useEffect(() => { answersRef.current = answers }, [answers])
@@ -290,22 +308,142 @@ export default function InteractiveExam({
   useEffect(() => { currentRef.current = current }, [current])
   useEffect(() => { modeRef.current = mode }, [mode])
 
-  // ── Cache user id on mount (needed for beforeunload beacon) ──────────────
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      userIdRef.current = user?.id ?? null
-    })
-  }, [supabase])
+  // ── Attempt session ───────────────────────────────────────────────────────
+  /**
+   * Opens the attempt once (or resumes the open one) and remembers the result.
+   * Every answer and the final submit wait for this. If it fails, the next
+   * call simply tries again, reusing any attempt that was already opened.
+   */
+  const ensureSession = useCallback((): Promise<ExamSession> => {
+    if (!sessionPromiseRef.current) {
+      const shouldResume = resumeRef.current
+      // Any later retry must reuse the attempt instead of opening another one
+      resumeRef.current = true
 
-  // ── Dark mode observer ────────────────────────────────────────────────────
+      const promise = (async (): Promise<ExamSession> => {
+        const { data: { user } } = await supabase.auth.getUser()
+        userIdRef.current = user?.id ?? null
+        if (!user) return { userId: null, attemptId: null }
+
+        // A fresh start replaces any older saved position for this exam
+        if (!shouldResume && targetExamId) {
+          await supabase
+            .from('study_progress')
+            .delete()
+            .eq('user_id', user.id)
+            .eq('exam_id', targetExamId)
+        }
+
+        const attemptId = await startAttempt(
+          { examId: targetExamId, customExamId: targetCustomExamId },
+          shouldResume
+        )
+        return { userId: user.id, attemptId }
+      })()
+
+      promise.catch(() => {
+        sessionPromiseRef.current = null
+      })
+      sessionPromiseRef.current = promise
+    }
+    return sessionPromiseRef.current
+  }, [supabase, targetExamId, targetCustomExamId])
+
+  // Open the attempt as soon as the exam screen loads, then show saved bookmarks
   useEffect(() => {
-    const sync = () =>
-      setIsDark(document.documentElement.classList.contains('dark'))
-    sync()
-    const obs = new MutationObserver(sync)
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
-    return () => obs.disconnect()
-  }, [])
+    let cancelled = false
+    ensureSession()
+      .then(async session => {
+        if (!session.userId) return
+        const saved = await loadBookmarkedIds(session.userId, questions.map(q => q.id))
+        if (cancelled || saved.size === 0) return
+        setBookmarked(current => {
+          const merged = { ...current }
+          saved.forEach(id => { merged[id] = true })
+          return merged
+        })
+      })
+      .catch(err => console.error('Could not start the attempt:', err))
+    return () => { cancelled = true }
+  }, [ensureSession, questions])
+
+  /** Shows a short message at the bottom of the screen for 3 seconds. */
+  function showNotice(message: string): void {
+    setNotice(message)
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
+    noticeTimerRef.current = setTimeout(() => setNotice(null), 3000)
+  }
+
+  /** Bookmarks are permanent and saved immediately (signed-in students only). */
+  async function toggleBookmark(qid: string): Promise<void> {
+    let userId: string | null = null
+    try {
+      userId = (await ensureSession()).userId
+    } catch {
+      userId = userIdRef.current
+    }
+    if (!userId) {
+      showNotice('Sign in to save bookmarks.')
+      return
+    }
+
+    const next = !bookmarked[qid]
+    setBookmarked(b => ({ ...b, [qid]: next }))
+    try {
+      await setBookmark(userId, qid, next)
+    } catch (err) {
+      console.error('Could not save bookmark:', err)
+      setBookmarked(b => ({ ...b, [qid]: !next }))
+      showNotice('Could not save the bookmark. Please try again.')
+    }
+  }
+
+  function closeReport(): void {
+    setReportOpen(false)
+    setReportType('')
+    setReportDescription('')
+    setReportError(null)
+  }
+
+  async function sendReport(qid: string): Promise<void> {
+    if (!reportType || reportSending) return
+    setReportSending(true)
+    setReportError(null)
+    try {
+      await submitReport(qid, reportType, reportDescription)
+      closeReport()
+      showNotice('Report sent. Thank you for helping improve the questions.')
+    } catch (err) {
+      setReportError(err instanceof Error ? err.message : 'Could not send the report. Please try again.')
+    } finally {
+      setReportSending(false)
+    }
+  }
+
+  // Remember every question that appears on screen while solving
+  useEffect(() => {
+    const shownQuestion = questions[current]
+    if (mode === 'play' && shownQuestion) viewedRef.current.add(shownQuestion.id)
+  }, [current, mode, questions])
+
+  /** Refreshes the study tip for a regular exam (never blocks the student). */
+  async function refreshTipSafely(): Promise<void> {
+    if (!targetExamId || !userIdRef.current) return
+    try {
+      await refreshStudyTip(targetExamId)
+    } catch (err) {
+      console.error('Could not update study tip:', err)
+    }
+  }
+
+  /** Starts a brand-new attempt (Restart / Retake). The old one is abandoned. */
+  function startNewAttempt(): void {
+    sessionPromiseRef.current = null
+    resumeRef.current = false
+    questionTimeRef.current = {}
+    viewedRef.current = new Set()
+    ensureSession().catch(err => console.error('Could not start the attempt:', err))
+  }
 
   // ── Timer (counts up) ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -314,68 +452,89 @@ export default function InteractiveExam({
       return
     }
     timerRef.current = setInterval(() => {
+      // Time only counts while the student can actually see the exam
+      if (document.visibilityState !== 'visible') return
       secondsRef.current += 1
       setSecondsElapsed(s => s + 1)
+
+      const shownQuestion = questions[currentRef.current]
+      if (shownQuestion && !answersRef.current[shownQuestion.id]) {
+        questionTimeRef.current[shownQuestion.id] =
+          (questionTimeRef.current[shownQuestion.id] ?? 0) + 1
+      }
     }, 1000)
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
     }
-  }, [mode])
+  }, [mode, questions])
 
   // ── Auto-save every 30 s (only during play, only for logged-in users) ─────
-  const persistProgress = useCallback(async () => {
+  const persistProgress = useCallback(async (): Promise<void> => {
     if (modeRef.current !== 'play') return
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+
+    let session: ExamSession
+    try {
+      session = await ensureSession()
+    } catch {
+      return // the next auto-save tries again
+    }
+    if (!session.userId) return
+
+    // Study time is stored on the attempt
+    if (session.attemptId) {
+      await updateAttemptTime(session.attemptId, secondsRef.current)
+    }
+
+    // Custom exams are not resumed from the prep page, so no position is kept
+    if (isCustomExam) return
 
     await supabase.from('study_progress').upsert(
       {
-        user_id: user.id,
+        user_id: session.userId,
         exam_id: exam.id,
         current_question: currentRef.current,
         answers_json: answersRef.current,
         flags_json: Object.keys(flaggedRef.current).filter(id => flaggedRef.current[id]),
-        remaining_time: secondsRef.current,
+        elapsed_seconds: secondsRef.current,
         completed: false,
       },
       { onConflict: 'user_id,exam_id' }
     )
-  }, [exam.id, supabase])
+  }, [ensureSession, exam.id, isCustomExam, supabase])
 
   useEffect(() => {
+    if (mode !== 'play') return
     autoSaveRef.current = setInterval(persistProgress, 30_000)
     return () => {
       if (autoSaveRef.current) clearInterval(autoSaveRef.current)
     }
-  }, [persistProgress])
+  }, [persistProgress, mode])
 
   // ── Save on browser close / tab close / refresh ───────────────────────────
   // beforeunload fires synchronously — we cannot await inside it.
   // We use sendBeacon (fire-and-forget) so the POST completes after the page unloads.
-  // The user_id was cached on mount in userIdRef so we can use it here without async.
+  // The beacon carries the session cookies; the server identifies the student from them.
+  // Answers themselves are already saved one by one, this only keeps the position.
   useEffect(() => {
     function handleBeforeUnload() {
       // Only save if we are still in play mode (not after finish)
       if (modeRef.current !== 'play') return
-      if (!userIdRef.current) return
+      if (!userIdRef.current || isCustomExam) return
 
       const payload = JSON.stringify({
-        user_id: userIdRef.current,
         exam_id: exam.id,
         current_question: currentRef.current,
         answers_json: answersRef.current,
         flags_json: Object.keys(flaggedRef.current).filter(id => flaggedRef.current[id]),
-        remaining_time: secondsRef.current,
+        elapsed_seconds: secondsRef.current,
         completed: false,
       })
-      // sendBeacon survives page unload; the /api/save-progress route uses
-      // the service-role key to write to Supabase without cookies
       navigator.sendBeacon('/api/save-progress', new Blob([payload], { type: 'application/json' }))
     }
 
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [exam.id])
+  }, [exam.id, isCustomExam])
 
   // ── Save on browser Back button ───────────────────────────────────────────
   // popstate fires when the user presses the browser Back/Forward button.
@@ -383,15 +542,14 @@ export default function InteractiveExam({
   useEffect(() => {
     function handlePopState() {
       if (modeRef.current !== 'play') return
-      if (!userIdRef.current) return
+      if (!userIdRef.current || isCustomExam) return
 
       const payload = JSON.stringify({
-        user_id: userIdRef.current,
         exam_id: exam.id,
         current_question: currentRef.current,
         answers_json: answersRef.current,
         flags_json: Object.keys(flaggedRef.current).filter(id => flaggedRef.current[id]),
-        remaining_time: secondsRef.current,
+        elapsed_seconds: secondsRef.current,
         completed: false,
       })
       navigator.sendBeacon('/api/save-progress', new Blob([payload], { type: 'application/json' }))
@@ -399,69 +557,60 @@ export default function InteractiveExam({
 
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
-  }, [exam.id])
+  }, [exam.id, isCustomExam])
 
   // ── "Continue Later" ──────────────────────────────────────────────────────
   /**
    * Saves the full current state to study_progress, then navigates back.
    * The prep page (force-dynamic) will re-fetch and find the row → show Continue.
    */
-  async function saveProgressAndExit() {
+  async function saveProgressAndExit(): Promise<void> {
+    // Save the latest time and position while still in play mode
+    try {
+      await persistProgress()
+    } catch (err) {
+      console.error('Could not save progress before leaving:', err)
+    }
+
+    // Most students leave without finishing, so the study tip is refreshed here too
+    await refreshTipSafely()
+
     // Stop timer and auto-save
     if (timerRef.current) clearInterval(timerRef.current)
     if (autoSaveRef.current) clearInterval(autoSaveRef.current)
-
-    const { data: { user } } = await supabase.auth.getUser()
-    if (user) {
-      await supabase.from('study_progress').upsert(
-        {
-          user_id: user.id,
-          exam_id: exam.id,
-          current_question: currentRef.current,
-          answers_json: answersRef.current,
-          flags_json: Object.keys(flaggedRef.current).filter(id => flaggedRef.current[id]),
-          remaining_time: secondsRef.current,
-          completed: false,
-        },
-        { onConflict: 'user_id,exam_id' }
-      )
-    }
 
     window.location.replace(prepPath)
   }
 
   // ── Finish exam ───────────────────────────────────────────────────────────
   /**
-   * Stops the timer, saves results (which also deletes study_progress),
-   * then switches to result mode.
-   * When the user later navigates back to the prep page, no row exists → "Start Exam".
+   * Closes the attempt on the server. Every answer is sent again as a safety
+   * net (answers that were already saved are ignored by the database).
+   * On failure the result screen shows a Retry button.
    */
-  async function finishExam() {
-    if (timerRef.current) clearInterval(timerRef.current)
-    if (autoSaveRef.current) clearInterval(autoSaveRef.current)
-
-    const elapsed = secondsRef.current
-    setFinalTimeTaken(elapsed)
-    setMode('result')
-    setNavOpen(false)
-
-    const results = questions.map(q => ({
-      questionId: q.id,
-      selectedAnswer: answersRef.current[q.id] ?? null,
-      correctAnswer: q.correct_answer,
-      isBookmarked: bookmarked[q.id] ?? false,
-      isFlagged: flaggedRef.current[q.id] ?? false,
-    }))
-
+  async function saveResults(totalSeconds: number): Promise<void> {
     setIsSaving(true)
     setSaveError(false)
     try {
-      // saveExamResults already deletes study_progress for logged-in users
-      await saveExamResults({
-        examId: exam.id,
-        results,
-        totalTimeSeconds: elapsed,
-      })
+      const session = await ensureSession()
+
+      // Guests: every answer was already counted when it was picked
+      if (!session.userId) return
+      if (!session.attemptId) throw new Error('No open attempt')
+
+      const payload: AnswerPayload[] = questions.map(q => ({
+        questionId: q.id,
+        chosenAnswer: answersRef.current[q.id] ?? null,
+        timeSeconds: questionTimeRef.current[q.id] ?? 0,
+        isFlagged: flaggedRef.current[q.id] ?? false,
+        isBookmarked: bookmarked[q.id] ?? false,
+        wasViewed: viewedRef.current.has(q.id),
+      }))
+
+      await finishAttempt(session.attemptId, payload, totalSeconds)
+
+      // Study tips are refreshed for regular exams (never blocks the result)
+      void refreshTipSafely()
     } catch (err) {
       console.error('Failed to save exam results:', err)
       setSaveError(true)
@@ -470,15 +619,42 @@ export default function InteractiveExam({
     }
   }
 
+  /** Stops the timer, switches to the result screen, then saves. */
+  async function finishExam(): Promise<void> {
+    if (timerRef.current) clearInterval(timerRef.current)
+    if (autoSaveRef.current) clearInterval(autoSaveRef.current)
+
+    const elapsed = secondsRef.current
+    setFinalTimeTaken(elapsed)
+    setMode('result')
+    setNavOpen(false)
+
+    await saveResults(elapsed)
+  }
+
   // ── Navigation helpers ────────────────────────────────────────────────────
 
-  function selectAnswer(qid: string, key: string) {
-    setAnswers(prev => {
-      if (prev[qid]) return prev // already answered — immutable
-      const updated = { ...prev, [qid]: key }
-      answersRef.current = updated
-      return updated
-    })
+  function selectAnswer(qid: string, key: string): void {
+    if (answersRef.current[qid]) return // already answered — immutable
+    const updated = { ...answersRef.current, [qid]: key }
+    answersRef.current = updated
+    setAnswers(updated)
+    void submitAnswer(qid, key)
+  }
+
+  /**
+   * Saves the answer in the background the moment it is picked.
+   * If it cannot be saved now, it is sent again when the exam is finished.
+   */
+  async function submitAnswer(qid: string, key: string): Promise<void> {
+    try {
+      const session = await ensureSession()
+      // Signed-in student whose attempt could not be opened yet: re-sent on Finish
+      if (session.userId && !session.attemptId) return
+      await recordAnswer(session.attemptId, qid, key, questionTimeRef.current[qid] ?? 0)
+    } catch (err) {
+      console.error('Answer will be sent again on Finish:', err)
+    }
   }
 
   function goTo(index: number) {
@@ -510,11 +686,6 @@ export default function InteractiveExam({
   }
 
   // ── Derived values ────────────────────────────────────────────────────────
-
-  const theme = isDark ? DARK : LIGHT
-  const rootStyle = Object.entries(theme)
-    .map(([k, v]) => `--${k}:${v}`)
-    .join(';')
 
   const currentQ = questions[current]
   const selectedKey = answers[currentQ?.id] ?? null
@@ -570,7 +741,7 @@ export default function InteractiveExam({
     height: 38,
     flexShrink: 0,
     borderRadius: 11,
-    border: '1px solid var(--border)',
+    border: '1px solid var(--bd)',
     background: 'var(--bg-soft)',
     color: 'var(--fg)',
     display: 'flex',
@@ -581,16 +752,30 @@ export default function InteractiveExam({
 
   // ── Shared CSS ────────────────────────────────────────────────────────────
   const sharedCSS = `
-    @keyframes examFadeIn { from { opacity:0; transform:translateY(12px) } to { opacity:1; transform:translateY(0) } }
-    @keyframes noteSlide  { from { opacity:0; max-height:0 } to { opacity:1; max-height:120px } }
-    @keyframes slideInPanel { from { transform:translateX(100%) } to { transform:translateX(0) } }
-    @keyframes fadeDim    { from { opacity:0 } to { opacity:1 } }
-    @keyframes modalPop   { from { opacity:0; transform:translateY(8px) scale(.97) } to { opacity:1; transform:translateY(0) scale(1) } }
-    @keyframes popIn      { from { opacity:0; transform:scale(.85) } to { opacity:1; transform:scale(1) } }
-    @keyframes spin       { from { transform:rotate(0deg) } to { transform:rotate(360deg) } }
+    /* Centered dialogs keep their translate(-50%,-50%) while popping in */
+    @keyframes examModalIn {
+      from { opacity: 0; transform: translate(-50%, -50%) scale(.94); }
+      to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    }
+    @keyframes examToastIn {
+      from { opacity: 0; transform: translate(-50%, 16px); }
+      to   { opacity: 1; transform: translate(-50%, 0); }
+    }
+    .exam-modal  { animation: examModalIn .34s var(--ease-spring) both; }
+    .exam-toast  { animation: examToastIn .4s var(--ease-out) both; }
+    .exam-drawer { animation: mc-drawer .42s var(--ease-out) both; }
+    /* Phones: the question navigator becomes a bottom sheet */
+    @media (max-width: 640px) {
+      .exam-drawer {
+        top: auto !important; left: 0 !important; right: 0 !important;
+        width: auto !important; max-height: 82vh;
+        border-radius: 24px 24px 0 0;
+        animation-name: mc-sheet;
+      }
+    }
+    .exam-opt-idle:hover { border-color: var(--primary) !important; transform: translateX(3px); }
     * { box-sizing: border-box; }
     button { font-family: inherit; }
-    :root { ${rootStyle} }
   `
 
   // ── Sticky header (shared across all modes) ───────────────────────────────
@@ -603,12 +788,13 @@ export default function InteractiveExam({
 
   const Header = (
     <header
+      className="a-fade"
       style={{
         position: 'sticky',
         top: 0,
         zIndex: 40,
         background: 'var(--bg-elev)',
-        borderBottom: '1px solid var(--border)',
+        borderBottom: '1px solid var(--bd)',
         backdropFilter: 'blur(10px)',
       }}
     >
@@ -666,7 +852,7 @@ export default function InteractiveExam({
                 gap: 6,
                 padding: '8px 14px',
                 borderRadius: 11,
-                border: '1px solid var(--border)',
+                border: '1px solid var(--bd)',
                 background: 'transparent',
                 color: 'var(--fg-muted)',
                 fontWeight: 600,
@@ -675,9 +861,10 @@ export default function InteractiveExam({
                 flexShrink: 0,
               }}
               onClick={saveProgressAndExit}
+              className="press"
             >
               <BackArrow />
-              Continue Later
+              {isCustomExam ? 'Exit' : 'Continue Later'}
             </button>
 
             <button
@@ -687,7 +874,7 @@ export default function InteractiveExam({
                 gap: 6,
                 padding: '8px 14px',
                 borderRadius: 11,
-                border: '1px solid color-mix(in srgb, #d97706 35%, var(--border))',
+                border: '1px solid color-mix(in srgb, #d97706 35%, var(--bd))',
                 background: 'color-mix(in srgb, #d97706 10%, var(--bg-soft))',
                 color: '#b45309',
                 fontWeight: 700,
@@ -696,6 +883,7 @@ export default function InteractiveExam({
                 flexShrink: 0,
               }}
               onClick={() => setRestartConfirmOpen(true)}
+              className="press"
             >
               <RestartIcon />
               Restart
@@ -718,6 +906,7 @@ export default function InteractiveExam({
                 boxShadow: '0 2px 10px color-mix(in srgb, oklch(55% 0.15 145) 35%, transparent)',
               }}
               onClick={() => setFinishConfirmOpen(true)}
+              className="press"
             >
               <CheckIcon />
               Finish
@@ -733,18 +922,23 @@ export default function InteractiveExam({
                 background: timerLow
                   ? 'color-mix(in srgb, var(--primary) 18%, var(--bg-soft))'
                   : 'var(--bg-soft)',
-                border: `1px solid ${timerLow ? 'var(--primary)' : 'var(--border)'}`,
+                border: `1px solid ${timerLow ? 'var(--primary)' : 'var(--bd)'}`,
                 color: timerLow ? 'var(--primary)' : 'var(--fg)',
                 fontWeight: 800,
                 fontSize: 13.5,
                 fontVariantNumeric: 'tabular-nums',
               }}
             >
-              <ClockIcon />
+              {timerLow ? <ClockIcon /> : (
+                <span
+                  className="a-blink"
+                  style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent-green)' }}
+                />
+              )}
               <span>{timerLabel}</span>
             </div>
 
-            <button style={headerBtnStyle} onClick={() => setNavOpen(true)}>
+            <button className="press" style={headerBtnStyle} onClick={() => setNavOpen(true)} aria-label="Open question navigator">
               <GridIcon />
             </button>
           </div>
@@ -753,14 +947,14 @@ export default function InteractiveExam({
 
       {/* Progress bar — play mode only */}
       {mode === 'play' && (
-        <div style={{ height: 3, background: 'var(--border)' }}>
+        <div style={{ height: 3, background: 'var(--bd)' }}>
           <div
             style={{
               height: '100%',
               width: `${progressPct}%`,
               background:
                 'linear-gradient(90deg, var(--primary), var(--accent-purple))',
-              transition: 'width .4s ease',
+              transition: 'width .6s var(--ease-out)',
             }}
           />
         </div>
@@ -815,15 +1009,16 @@ export default function InteractiveExam({
             </div>
           </div>
 
-          {/* Question card */}
+          {/* Question card — keyed so it animates in on every question */}
           <div
+            key={currentQ.id}
+            className="a-rise"
             style={{
               background: 'var(--bg-elev)',
-              border: '1px solid var(--border)',
+              border: '1px solid var(--bd)',
               borderRadius: 18,
               padding: 24,
               boxShadow: '0 1px 3px var(--shadow)',
-              animation: 'examFadeIn .3s ease',
             }}
           >
             {/* Meta row */}
@@ -901,7 +1096,7 @@ export default function InteractiveExam({
                   width: 34,
                   height: 34,
                   borderRadius: 10,
-                  border: '1px solid var(--border)',
+                  border: '1px solid var(--bd)',
                   background: bookmarked[currentQ.id]
                     ? 'var(--primary-soft)'
                     : 'var(--bg-soft)',
@@ -914,23 +1109,25 @@ export default function InteractiveExam({
                   cursor: 'pointer',
                   flexShrink: 0,
                 }}
-                onClick={() =>
-                  setBookmarked(b => ({
-                    ...b,
-                    [currentQ.id]: !b[currentQ.id],
-                  }))
-                }
+                className="press"
+                onClick={() => toggleBookmark(currentQ.id)}
+                aria-label={bookmarked[currentQ.id] ? 'Remove bookmark' : 'Bookmark this question'}
+                aria-pressed={bookmarked[currentQ.id] ?? false}
               >
-                <BookmarkIcon
-                  fill={bookmarked[currentQ.id] ? 'currentColor' : 'none'}
-                />
+                <span
+                  key={bookmarked[currentQ.id] ? 'on' : 'off'}
+                  className={bookmarked[currentQ.id] ? 'a-pop' : undefined}
+                  style={{ display: 'flex' }}
+                >
+                  <BookmarkIcon fill={bookmarked[currentQ.id] ? 'currentColor' : 'none'} />
+                </span>
               </button>
               <button
                 style={{
                   width: 34,
                   height: 34,
                   borderRadius: 10,
-                  border: '1px solid var(--border)',
+                  border: '1px solid var(--bd)',
                   background: flagged[currentQ.id]
                     ? 'var(--primary-soft)'
                     : 'var(--bg-soft)',
@@ -943,13 +1140,20 @@ export default function InteractiveExam({
                   cursor: 'pointer',
                   flexShrink: 0,
                 }}
+                className="press"
+                aria-label={flagged[currentQ.id] ? 'Remove flag' : 'Flag this question'}
+                aria-pressed={flagged[currentQ.id] ?? false}
                 onClick={() =>
                   setFlagged(f => ({ ...f, [currentQ.id]: !f[currentQ.id] }))
                 }
               >
-                <FlagIcon
-                  fill={flagged[currentQ.id] ? 'currentColor' : 'none'}
-                />
+                <span
+                  key={flagged[currentQ.id] ? 'on' : 'off'}
+                  className={flagged[currentQ.id] ? 'a-pop' : undefined}
+                  style={{ display: 'flex' }}
+                >
+                  <FlagIcon fill={flagged[currentQ.id] ? 'currentColor' : 'none'} />
+                </span>
               </button>
             </div>
 
@@ -974,7 +1178,7 @@ export default function InteractiveExam({
                   marginBottom: 16,
                   borderRadius: 12,
                   overflow: 'hidden',
-                  border: '1px solid var(--border)',
+                  border: '1px solid var(--bd)',
                 }}
               >
                 <img
@@ -994,13 +1198,20 @@ export default function InteractiveExam({
             <div
               style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
             >
-              {opts.map(opt => (
-                <div key={opt.key}>
+              {opts.map((opt, i) => (
+                <div key={opt.key} className="a-rise" style={stagger(i + 1)}>
                   <div
+                    className={selectedKey ? undefined : 'exam-opt-idle'}
                     style={opt.rowStyle}
                     onClick={() => selectAnswer(currentQ.id, opt.key)}
                   >
-                    <span style={opt.badgeStyle}>{opt.badgeContent}</span>
+                    <span
+                      key={opt.badgeContent}
+                      className={selectedKey && (opt.isCorrect || opt.isWrongSelected) ? 'a-pop' : undefined}
+                      style={opt.badgeStyle}
+                    >
+                      {opt.badgeContent}
+                    </span>
                     <span
                       style={{ flex: '1 1 auto', fontSize: 15, fontWeight: 600 }}
                     >
@@ -1009,12 +1220,12 @@ export default function InteractiveExam({
                   </div>
                   {selectedKey && opt.isWrongSelected && opt.note && (
                     <div
+                      className="a-rise"
                       style={{
                         margin: '6px 2px 0 42px',
                         fontSize: 13,
                         fontWeight: 600,
                         color: 'var(--primary)',
-                        animation: 'noteSlide .25s ease',
                       }}
                     >
                       {opt.note}
@@ -1053,6 +1264,7 @@ export default function InteractiveExam({
                   fontSize: 13.5,
                   cursor: 'pointer',
                 }}
+                className="press"
                 onClick={() => setReportOpen(true)}
               >
                 <ReportIcon />
@@ -1068,7 +1280,7 @@ export default function InteractiveExam({
                     borderRadius: 12,
                     border: showExplanation
                       ? '1px solid var(--accent-green)'
-                      : '1px solid var(--border)',
+                      : '1px solid var(--bd)',
                     background: showExplanation
                       ? 'color-mix(in srgb, var(--accent-green) 12%, var(--bg-elev))'
                       : 'var(--bg-soft)',
@@ -1078,6 +1290,7 @@ export default function InteractiveExam({
                     cursor: 'pointer',
                     transition: 'all .2s ease',
                   }}
+                  className="press"
                   onClick={() => setShowExplanation(prev => !prev)}
                 >
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -1096,7 +1309,7 @@ export default function InteractiveExam({
                   gap: 6,
                   padding: '11px 18px',
                   borderRadius: 12,
-                  border: '1px solid var(--border)',
+                  border: '1px solid var(--bd)',
                   background: 'var(--bg-elev)',
                   color: 'var(--fg)',
                   fontWeight: 700,
@@ -1104,6 +1317,7 @@ export default function InteractiveExam({
                   cursor: current === 0 ? 'not-allowed' : 'pointer',
                   opacity: current === 0 ? 0.5 : 1,
                 }}
+                className="press"
                 onClick={goPrev}
                 disabled={current === 0}
               >
@@ -1126,6 +1340,7 @@ export default function InteractiveExam({
                   boxShadow:
                     '0 4px 14px color-mix(in srgb, var(--primary) 35%, transparent)',
                 }}
+                className="press nudge"
                 onClick={goNext}
               >
                 {current >= questions.length - 1 ? 'Finish' : 'Next'}
@@ -1137,10 +1352,10 @@ export default function InteractiveExam({
           {/* Explanation — shown only when requested */}
           {selectedKey && currentQ.explanation && showExplanation && (
             <div
+              className="a-rise"
               style={{
                 marginTop: 20,
-                animation: 'examFadeIn .25s ease',
-                borderTop: '1px solid var(--border)',
+                borderTop: '1px solid var(--bd)',
                 paddingTop: 20,
               }}
             >
@@ -1163,7 +1378,7 @@ export default function InteractiveExam({
                     gap: 5,
                     padding: '7px 13px',
                     borderRadius: 9,
-                    border: '1px solid var(--border)',
+                    border: '1px solid var(--bd)',
                     background: 'transparent',
                     color: 'var(--fg-muted)',
                     fontWeight: 600,
@@ -1185,13 +1400,14 @@ export default function InteractiveExam({
                     gap: 5,
                     padding: '7px 14px',
                     borderRadius: 9,
-                    border: '1px solid var(--border)',
+                    border: '1px solid var(--bd)',
                     background: 'var(--bg-soft)',
                     color: 'var(--fg)',
                     fontWeight: 600,
                     fontSize: 13,
                     cursor: 'pointer',
                   }}
+                  className="press nudge"
                   onClick={goNext}
                 >
                   {current >= questions.length - 1 ? 'Finish' : 'Next Question'}
@@ -1206,16 +1422,19 @@ export default function InteractiveExam({
         {navOpen && (
           <>
             <div
+              className="a-fade"
               style={{
                 position: 'fixed',
                 inset: 0,
                 background: 'rgba(0,0,0,.45)',
                 zIndex: 60,
-                animation: 'fadeDim .2s ease',
               }}
               onClick={() => setNavOpen(false)}
             />
             <div
+              className="exam-drawer"
+              role="dialog"
+              aria-label="Question navigator"
               style={{
                 position: 'fixed',
                 top: 0,
@@ -1225,7 +1444,6 @@ export default function InteractiveExam({
                 background: 'var(--bg-elev)',
                 zIndex: 61,
                 boxShadow: '-8px 0 30px var(--shadow)',
-                animation: 'slideInPanel .25s ease',
                 display: 'flex',
                 flexDirection: 'column',
               }}
@@ -1233,7 +1451,7 @@ export default function InteractiveExam({
               <div
                 style={{
                   padding: '20px 22px',
-                  borderBottom: '1px solid var(--border)',
+                  borderBottom: '1px solid var(--bd)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
@@ -1249,7 +1467,7 @@ export default function InteractiveExam({
                     width: 32,
                     height: 32,
                     borderRadius: 9,
-                    border: '1px solid var(--border)',
+                    border: '1px solid var(--bd)',
                     background: 'var(--bg-soft)',
                     color: 'var(--fg)',
                     display: 'flex',
@@ -1283,7 +1501,7 @@ export default function InteractiveExam({
                     const ans = answers[q.id]
                     const isCurrent = i === current
                     let bg = 'var(--bg-soft)',
-                      border = 'var(--border)',
+                      border = 'var(--bd)',
                       color = 'var(--fg-muted)'
                     if (ans) {
                       bg =
@@ -1298,6 +1516,7 @@ export default function InteractiveExam({
                     return (
                       <button
                         key={q.id}
+                        className="press"
                         onClick={() => goTo(i)}
                         style={{
                           position: 'relative',
@@ -1362,7 +1581,7 @@ export default function InteractiveExam({
               <div
                 style={{
                   padding: '18px 22px',
-                  borderTop: '1px solid var(--border)',
+                  borderTop: '1px solid var(--bd)',
                 }}
               >
                 <button
@@ -1389,33 +1608,35 @@ export default function InteractiveExam({
         {restartConfirmOpen && (
           <>
             <div
+              className="a-fade"
               style={{
                 position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)',
-                zIndex: 200, animation: 'fadeDim .2s ease',
+                zIndex: 200,
               }}
               onClick={() => setRestartConfirmOpen(false)}
             />
             <div
+              className="exam-modal"
               style={{
                 position: 'fixed', top: '50%', left: '50%',
                 transform: 'translate(-50%,-50%)',
                 width: 'min(420px, 90vw)',
                 background: 'var(--bg-elev)', borderRadius: 18,
-                border: '1px solid var(--border)', padding: '28px 26px',
-                zIndex: 201, animation: 'modalPop .2s ease',
+                border: '1px solid var(--bd)', padding: '28px 26px',
+                zIndex: 201,
               }}
             >
               <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--fg)', marginBottom: 10 }}>
                 Restart Exam?
               </div>
               <div style={{ fontSize: 14, color: 'var(--fg-muted)', fontWeight: 600, lineHeight: 1.6, marginBottom: 24 }}>
-                This will clear all your answers, flags, and reset the timer. This action cannot be undone.
+                This will clear your answers and flags and reset the timer. Answers you already gave still count in your statistics.
               </div>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                 <button
                   style={{
                     padding: '10px 20px', borderRadius: 11,
-                    border: '1px solid var(--border)', background: 'transparent',
+                    border: '1px solid var(--bd)', background: 'transparent',
                     color: 'var(--fg)', fontWeight: 700, fontSize: 14,
                     cursor: 'pointer', fontFamily: 'inherit',
                   }}
@@ -1433,13 +1654,13 @@ export default function InteractiveExam({
                     setRestartConfirmOpen(false)
                     setAnswers({})
                     setFlagged({})
-                    setBookmarked({})
                     setCurrent(0)
                     currentRef.current = 0
                     answersRef.current = {}
                     flaggedRef.current = {}
                     setSecondsElapsed(0)
                     secondsRef.current = 0
+                    startNewAttempt()
                   }}
                 >
                   Yes, Restart
@@ -1453,20 +1674,22 @@ export default function InteractiveExam({
         {finishConfirmOpen && (
           <>
             <div
+              className="a-fade"
               style={{
                 position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)',
-                zIndex: 200, animation: 'fadeDim .2s ease',
+                zIndex: 200,
               }}
               onClick={() => setFinishConfirmOpen(false)}
             />
             <div
+              className="exam-modal"
               style={{
                 position: 'fixed', top: '50%', left: '50%',
                 transform: 'translate(-50%,-50%)',
                 width: 'min(420px, 90vw)',
                 background: 'var(--bg-elev)', borderRadius: 18,
-                border: '1px solid var(--border)', padding: '28px 26px',
-                zIndex: 201, animation: 'modalPop .2s ease',
+                border: '1px solid var(--bd)', padding: '28px 26px',
+                zIndex: 201,
               }}
             >
               <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--fg)', marginBottom: 10 }}>
@@ -1491,7 +1714,7 @@ export default function InteractiveExam({
                 <button
                   style={{
                     padding: '10px 20px', borderRadius: 11,
-                    border: '1px solid var(--border)', background: 'transparent',
+                    border: '1px solid var(--bd)', background: 'transparent',
                     color: 'var(--fg)', fontWeight: 700, fontSize: 14,
                     cursor: 'pointer', fontFamily: 'inherit',
                   }}
@@ -1520,20 +1743,17 @@ export default function InteractiveExam({
         {reportOpen && (
           <>
             <div
+              className="a-fade"
               style={{
                 position: 'fixed',
                 inset: 0,
                 background: 'rgba(0,0,0,.45)',
                 zIndex: 200,
-                animation: 'fadeDim .2s ease',
               }}
-              onClick={() => {
-                setReportOpen(false)
-                setReportType('')
-                setReportDescription('')
-              }}
+              onClick={closeReport}
             />
             <div
+              className="exam-modal"
               style={{
                 position: 'fixed',
                 top: '50%',
@@ -1542,10 +1762,9 @@ export default function InteractiveExam({
                 width: 'min(480px, 90vw)',
                 background: 'var(--bg-elev)',
                 borderRadius: 18,
-                border: '1px solid var(--border)',
+                border: '1px solid var(--bd)',
                 padding: '22px 24px',
                 zIndex: 201,
-                animation: 'modalPop .2s ease',
               }}
             >
               <div
@@ -1564,7 +1783,7 @@ export default function InteractiveExam({
                     width: 30,
                     height: 30,
                     borderRadius: 9,
-                    border: '1px solid var(--border)',
+                    border: '1px solid var(--bd)',
                     background: 'var(--bg-soft)',
                     color: 'var(--fg)',
                     display: 'flex',
@@ -1593,7 +1812,7 @@ export default function InteractiveExam({
                   width: '100%',
                   padding: '11px 12px',
                   borderRadius: 11,
-                  border: '1px solid var(--border)',
+                  border: '1px solid var(--bd)',
                   background: 'var(--bg-soft)',
                   color: 'var(--fg)',
                   fontSize: 14,
@@ -1603,13 +1822,9 @@ export default function InteractiveExam({
                 }}
               >
                 <option value="">Select issue type</option>
-                <option value="wrong_answer">Wrong Answer</option>
-                <option value="typo">Typo or Spelling Error</option>
-                <option value="wrong_explanation">Wrong Explanation</option>
-                <option value="missing_image">Missing Image</option>
-                <option value="wrong_chapter">Wrong Chapter</option>
-                <option value="duplicate">Duplicate Question</option>
-                <option value="other">Other</option>
+                {REPORT_CATEGORIES.map(c => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
               </select>
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>
                 Description (Optional)
@@ -1617,28 +1832,34 @@ export default function InteractiveExam({
               <textarea
                 value={reportDescription}
                 onChange={e => setReportDescription(e.target.value)}
+                maxLength={MAX_REPORT_DESCRIPTION_LENGTH}
                 placeholder="Describe the issue..."
                 style={{
                   width: '100%',
                   minHeight: 84,
                   padding: '11px 12px',
                   borderRadius: 11,
-                  border: '1px solid var(--border)',
+                  border: '1px solid var(--bd)',
                   background: 'var(--bg-soft)',
                   color: 'var(--fg)',
                   fontSize: 14,
                   fontFamily: 'inherit',
                   resize: 'vertical',
-                  marginBottom: 18,
+                  marginBottom: reportError ? 10 : 18,
                   outline: 'none',
                 }}
               />
+              {reportError && (
+                <div role="alert" style={{ marginBottom: 14, fontSize: 13, fontWeight: 600, color: '#ef4444' }}>
+                  {reportError}
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                 <button
                   style={{
                     padding: '10px 18px',
                     borderRadius: 11,
-                    border: '1px solid var(--border)',
+                    border: '1px solid var(--bd)',
                     background: 'transparent',
                     color: 'var(--fg)',
                     fontWeight: 700,
@@ -1646,11 +1867,7 @@ export default function InteractiveExam({
                     cursor: 'pointer',
                     fontFamily: 'inherit',
                   }}
-                  onClick={() => {
-                    setReportOpen(false)
-                    setReportType('')
-                    setReportDescription('')
-                  }}
+                  onClick={closeReport}
                 >
                   Cancel
                 </button>
@@ -1663,39 +1880,61 @@ export default function InteractiveExam({
                     color: 'white',
                     fontWeight: 700,
                     fontSize: 14,
-                    cursor: !reportType ? 'not-allowed' : 'pointer',
-                    opacity: !reportType ? 0.5 : 1,
+                    cursor: !reportType || reportSending ? 'not-allowed' : 'pointer',
+                    opacity: !reportType || reportSending ? 0.5 : 1,
                     fontFamily: 'inherit',
                   }}
-                  disabled={!reportType}
-                  onClick={() => {
-                    if (!reportType) return
-                    setReportOpen(false)
-                    setReportType('')
-                    setReportDescription('')
-                  }}
+                  disabled={!reportType || reportSending}
+                  onClick={() => sendReport(currentQ.id)}
                 >
-                  Submit Report
+                  {reportSending ? 'Sending...' : 'Submit Report'}
                 </button>
               </div>
             </div>
           </>
         )}
 
+        {/* ── Short notices (bookmark / report feedback) ─────────────────── */}
+        {notice && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="exam-toast"
+            style={{
+              position: 'fixed',
+              left: '50%',
+              bottom: 24,
+              transform: 'translateX(-50%)',
+              zIndex: 300,
+              maxWidth: 'calc(100vw - 32px)',
+              padding: '11px 18px',
+              borderRadius: 12,
+              background: 'var(--fg)',
+              color: 'var(--bg-elev)',
+              fontSize: 13.5,
+              fontWeight: 700,
+              boxShadow: '0 10px 30px rgba(0,0,0,.25)',
+            }}
+          >
+            {notice}
+          </div>
+        )}
+
         {/* ── Jump Modal ─────────────────────────────────────────────────── */}
         {jumpOpen && (
           <>
             <div
+              className="a-fade"
               style={{
                 position: 'fixed',
                 inset: 0,
                 background: 'rgba(0,0,0,.5)',
                 zIndex: 70,
-                animation: 'fadeDim .2s ease',
               }}
               onClick={() => setJumpOpen(false)}
             />
             <div
+              className="exam-modal"
               style={{
                 position: 'fixed',
                 top: '50%',
@@ -1706,11 +1945,10 @@ export default function InteractiveExam({
                 overflowY: 'auto',
                 background: 'var(--bg-elev)',
                 borderRadius: 18,
-                border: '1px solid var(--border)',
+                border: '1px solid var(--bd)',
                 boxShadow: '0 20px 60px var(--shadow)',
                 padding: '22px 24px',
                 zIndex: 71,
-                animation: 'modalPop .2s ease',
               }}
             >
               <div
@@ -1772,12 +2010,12 @@ export default function InteractiveExam({
                       }
                     : {
                         position: 'relative', width: 46, height: 46, borderRadius: 12,
-                        border: '1.5px solid var(--border)', background: 'var(--bg-soft)',
+                        border: '1.5px solid var(--bd)', background: 'var(--bg-soft)',
                         color: 'var(--fg)', fontWeight: 700, fontSize: 15,
                         cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
                       }
                   return (
-                    <button key={q.id} style={btnStyle} onClick={() => goTo(i)}>
+                    <button key={q.id} className="press" style={btnStyle} onClick={() => goTo(i)}>
                       {i + 1}
                       {flagged[q.id] && (
                         <span
@@ -1823,9 +2061,10 @@ export default function InteractiveExam({
         >
           {/* Score card */}
           <div
+            className="a-pop"
             style={{
               background: 'var(--bg-elev)',
-              border: '1px solid var(--border)',
+              border: '1px solid var(--bd)',
               borderRadius: 20,
               padding: '36px 30px',
               boxShadow: '0 1px 3px var(--shadow)',
@@ -1833,17 +2072,17 @@ export default function InteractiveExam({
               flexDirection: 'column',
               alignItems: 'center',
               textAlign: 'center',
-              animation: 'popIn .35s ease',
               marginBottom: 24,
             }}
           >
             <svg width="180" height="180" viewBox="0 0 180 180">
-              <circle cx="90" cy="90" r="78" fill="none" stroke="var(--border)" strokeWidth="12" />
+              <circle cx="90" cy="90" r="78" fill="none" stroke="var(--bd)" strokeWidth="12" />
               <circle
                 cx="90" cy="90" r="78" fill="none" stroke={gaugeColor} strokeWidth="12"
                 strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={gaugeOffset}
                 transform="rotate(-90 90 90)"
-                style={{ transition: 'stroke-dashoffset .8s ease' }}
+                className="a-ring"
+                style={{ ['--c' as string]: circ } as React.CSSProperties}
               />
               <text x="90" y="85" textAnchor="middle" fill="var(--fg)" fontSize="32" fontWeight="800" fontFamily="inherit">
                 {scorePercent}%
@@ -1874,10 +2113,11 @@ export default function InteractiveExam({
                     ? 'color-mix(in srgb, var(--accent-green) 14%, var(--bg-soft))'
                     : 'color-mix(in srgb, var(--primary) 14%, var(--bg-soft))',
                 },
-              ].map(stat => (
+              ].map((stat, i) => (
                 <div
                   key={stat.label}
-                  style={{ padding: 14, borderRadius: 13, background: stat.bg, color: stat.color }}
+                  className="a-rise"
+                  style={{ ...stagger(i + 2), padding: 14, borderRadius: 13, background: stat.bg, color: stat.color }}
                 >
                   <div style={{ fontSize: 22, fontWeight: 800 }}>{stat.value}</div>
                   <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, opacity: 0.8 }}>
@@ -1905,7 +2145,7 @@ export default function InteractiveExam({
                 gap: 8,
               }}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" style={{ animation: 'spin 1s linear infinite' }}>
+              <svg className="a-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
                 <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
               </svg>
               Saving your results...
@@ -1924,7 +2164,27 @@ export default function InteractiveExam({
                 fontWeight: 700,
               }}
             >
-              Could not save results. Your progress may not be recorded.
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                <span>Could not save your results. Check your connection and try again.</span>
+                <button
+                  onClick={() => saveResults(finalTimeTaken)}
+                  disabled={isSaving}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: 10,
+                    border: 'none',
+                    background: 'var(--primary)',
+                    color: 'white',
+                    fontWeight: 700,
+                    fontSize: 13,
+                    cursor: isSaving ? 'not-allowed' : 'pointer',
+                    opacity: isSaving ? 0.7 : 1,
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
             </div>
           )}
 
@@ -1933,7 +2193,7 @@ export default function InteractiveExam({
             <div
               style={{
                 background: 'var(--bg-elev)',
-                border: '1px solid var(--border)',
+                border: '1px solid var(--bd)',
                 borderRadius: 16,
                 padding: '20px 24px',
                 marginBottom: 24,
@@ -1943,8 +2203,8 @@ export default function InteractiveExam({
                 By Chapter
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {chapterStats.map(cs => (
-                  <div key={cs.chapter}>
+                {chapterStats.map((cs, i) => (
+                  <div key={cs.chapter} className="a-rise" style={stagger(i)}>
                     <div
                       style={{
                         display: 'flex',
@@ -1961,7 +2221,9 @@ export default function InteractiveExam({
                       style={{ height: 8, borderRadius: 999, background: 'var(--bg-soft)' }}
                     >
                       <div
+                        className="a-grow"
                         style={{
+                          ...stagger(i),
                           height: '100%',
                           borderRadius: 999,
                           width: `${cs.pct}%`,
@@ -1971,7 +2233,6 @@ export default function InteractiveExam({
                               : cs.pct >= 40
                               ? 'var(--accent-blue)'
                               : 'var(--primary)',
-                          transition: 'width .5s ease',
                         }}
                       />
                     </div>
@@ -1995,6 +2256,7 @@ export default function InteractiveExam({
                 fontSize: 14,
                 cursor: 'pointer',
               }}
+              className="press"
               onClick={() => setMode('review')}
             >
               Review Answers
@@ -2004,7 +2266,7 @@ export default function InteractiveExam({
                 flex: '1 1 160px',
                 padding: 13,
                 borderRadius: 12,
-                border: '1px solid var(--border)',
+                border: '1px solid var(--bd)',
                 background: 'var(--bg-soft)',
                 color: 'var(--fg)',
                 fontWeight: 700,
@@ -2012,12 +2274,10 @@ export default function InteractiveExam({
                 cursor: 'pointer',
               }}
               onClick={() => {
-                // Reset all state for a clean retake
-                // study_progress was already deleted by saveExamResults,
-                // so no database cleanup needed here
+                // Reset all state for a clean retake in a brand-new attempt
+                startNewAttempt()
                 setAnswers({})
                 setFlagged({})
-                setBookmarked({})
                 setCurrent(0)
                 currentRef.current = 0
                 answersRef.current = {}
@@ -2036,7 +2296,7 @@ export default function InteractiveExam({
                 flex: '1 1 160px',
                 padding: 13,
                 borderRadius: 12,
-                border: '1px solid var(--border)',
+                border: '1px solid var(--bd)',
                 background: 'transparent',
                 color: 'var(--fg-muted)',
                 fontWeight: 700,
@@ -2089,9 +2349,11 @@ export default function InteractiveExam({
           return (
             <div
               key={q.id}
+              className="a-rise"
               style={{
+                ...stagger(Math.min(i, 8)),
                 background: 'var(--bg-elev)',
-                border: '1px solid var(--border)',
+                border: '1px solid var(--bd)',
                 borderRadius: 18,
                 padding: 24,
                 boxShadow: '0 1px 3px var(--shadow)',
@@ -2160,7 +2422,7 @@ export default function InteractiveExam({
                 <div
                   style={{
                     marginBottom: 14, borderRadius: 12, overflow: 'hidden',
-                    border: '1px solid var(--border)',
+                    border: '1px solid var(--bd)',
                   }}
                 >
                   <img

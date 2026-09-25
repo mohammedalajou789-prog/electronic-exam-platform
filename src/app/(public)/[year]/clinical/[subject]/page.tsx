@@ -1,13 +1,9 @@
-import { notFound } from 'next/navigation'
+﻿import { notFound } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import SharedSubjectPage from '@/components/exam/shared/SharedSubjectPage'
 
 interface PageProps {
   params: Promise<{ year: string; subject: string }>
-}
-
-function slugToName(slug: string): string {
-  return slug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
 }
 
 export default async function Page({ params }: PageProps) {
@@ -17,7 +13,7 @@ export default async function Page({ params }: PageProps) {
   const { data: academicYear } = await supabase
     .from('academic_years')
     .select('id, name, is_clinical')
-    .eq('name', slugToName(year))
+    .eq('slug', year)
     .single()
 
   if (!academicYear || !academicYear.is_clinical) notFound()
@@ -26,7 +22,7 @@ export default async function Page({ params }: PageProps) {
     .from('subjects')
     .select('id, name')
     .eq('year_id', academicYear.id)
-    .eq('name', slugToName(subject))
+    .eq('slug', subject)
     .single()
 
   if (!subjectRow) notFound()
