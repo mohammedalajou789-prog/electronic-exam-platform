@@ -1,5 +1,6 @@
 ﻿// src/app/(public)/search/page.tsx
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { createPublicSupabaseClient } from '@/lib/supabase/public'
+import { parseSearchTerms, searchQuestions, type SearchResponse } from '@/features/search/search-questions'
 import SearchClient from '@/components/search/SearchClient'
 
 interface PageProps {
@@ -10,7 +11,16 @@ export default async function SearchPage({ searchParams }: PageProps) {
   const { q } = await searchParams
   const query  = q?.trim() ?? ''
 
-  const supabase = await createServerSupabaseClient()
+  // Public content only, so the cookie-less client is enough
+  const supabase = createPublicSupabaseClient()
+
+  // Results for a query already in the URL (e.g. /search?q=heart).
+  // Runs in parallel with the filter options below; a failed search just shows no results.
+  const terms = query.length >= 2 ? parseSearchTerms(query) : []
+  const initialSearch: Promise<SearchResponse> = searchQuestions(terms).catch((error: unknown) => {
+    console.error('Search error:', error)
+    return { results: [], total: 0 }
+  })
 
   // Fetch all filter options server-side (small datasets — fine to load all)
   const [
@@ -19,6 +29,7 @@ export default async function SearchPage({ searchParams }: PageProps) {
     { data: subjectsRaw   },
     { data: batches       },
     { data: examsRaw      },
+    { results: initialResults, total: initialTotal },
   ] = await Promise.all([
 
     supabase
@@ -47,64 +58,9 @@ export default async function SearchPage({ searchParams }: PageProps) {
       .eq('status', 'published')
       .is('deleted_at', null)
       .order('title', { ascending: true }),
+
+    initialSearch,
   ])
-
-  // Fetch initial results if there's a query in the URL
-  let initialResults: any[] = []
-  let initialTotal = 0
-
-  if (query.length >= 2) {
-    const terms = query.split('+').map((t: string) => t.trim()).filter((t: string) => t.length >= 2)
-
-    const { data: raw } = await supabase
-      .from('questions')
-      .select(`
-        id, question_text, question_order,
-        choice_a, choice_b, choice_c, choice_d, choice_e,
-        correct_answer, explanation, chapter, lecture,
-        exam:exams(
-          id, title, calendar_year, status,
-          batch:batches(
-            id, name,
-            subject:subjects(
-              id, name,
-              semester_id,
-              academic_year_id,
-              semester:semesters(id, name, academic_year:academic_years!semesters_academic_year_id_fkey(id, name)),
-              academic_year:academic_years!subjects_academic_year_id_fkey(id, name)
-            )
-          )
-        ),
-        doctor:doctors(id, name)
-      `)
-      .is('deleted_at', null)
-      .limit(2000)
-
-    initialResults = (raw ?? []).filter((q: any) => {
-      if (q.exam?.status !== 'published') return false
-
-      const exam    = q.exam as any
-      const batch   = exam?.batch as any
-      const subject = batch?.subject as any
-      const doctor  = q.doctor as any
-
-      const academicYear = subject?.semester?.academic_year ?? subject?.academic_year
-
-      const haystack = [
-        q.question_text, q.chapter, q.lecture, q.correct_answer, q.explanation,
-        q.choice_a, q.choice_b, q.choice_c, q.choice_d, q.choice_e,
-        exam?.title, exam?.calendar_year?.toString(),
-        batch?.name, subject?.name,
-        subject?.semester?.name,
-        academicYear?.name,
-        doctor?.name,
-      ].filter(Boolean).join(' ').toLowerCase()
-
-      return terms.every((term: string) => haystack.includes(term.toLowerCase()))
-    })
-
-    initialTotal = initialResults.length
-  }
 
   return (
     <SearchClient
