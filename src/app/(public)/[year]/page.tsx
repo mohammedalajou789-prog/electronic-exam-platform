@@ -1,8 +1,23 @@
 ﻿// src/app/(public)/[year]/page.tsx
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { createPublicSupabaseClient } from '@/lib/supabase/public'
 import { ChevronRight, ArrowUpRight, ArrowRight, BookOpen, Leaf, Flower2, Sun } from 'lucide-react'
+
+/**
+ * Caching: this page only shows public academic content (no user data),
+ * so it is built once and served from cache to every student.
+ * It is rebuilt at most every 5 minutes, so new content from admins appears within 5 minutes.
+ */
+export const revalidate = 300
+
+/**
+ * No year pages are built during `npm run build`.
+ * Each year page is built on its first visit, then cached (see `revalidate` above).
+ */
+export async function generateStaticParams(): Promise<{ year: string }[]> {
+  return []
+}
 
 interface PageProps {
   params: Promise<{ year: string }>
@@ -262,7 +277,7 @@ const YEAR_CSS = `
 
 export default async function YearPage({ params }: PageProps) {
   const { year: yearSlug } = await params
-  const supabase = await createServerSupabaseClient()
+  const supabase = createPublicSupabaseClient()
 
   const { data: academicYear } = await supabase
     .from('academic_years')
