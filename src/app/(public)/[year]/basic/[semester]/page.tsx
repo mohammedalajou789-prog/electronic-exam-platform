@@ -1,7 +1,22 @@
 ﻿import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ChevronRight, ArrowUpRight, BookOpen } from 'lucide-react'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { createPublicSupabaseClient, assertQuerySucceeded } from '@/lib/supabase/public'
+
+/**
+ * Caching: this page only shows public academic content (no user data),
+ * so it is built once and served from cache to every student.
+ * It is rebuilt at most every 5 minutes, so new content from admins appears within 5 minutes.
+ */
+export const revalidate = 300
+
+/**
+ * No semester pages are built during `npm run build`.
+ * Each semester page is built on its first visit, then cached (see `revalidate` above).
+ */
+export async function generateStaticParams(): Promise<{ year: string; semester: string }[]> {
+  return []
+}
 
 interface PageProps {
   params: Promise<{ year: string; semester: string }>
@@ -168,30 +183,35 @@ const SEMESTER_CSS = `
 
 export default async function BasicSemesterPage({ params }: PageProps) {
   const { year: yearSlug, semester: semSlug } = await params
-  const supabase = await createServerSupabaseClient()
+  const supabase = createPublicSupabaseClient()
 
-  const { data: academicYear } = await supabase
+  // maybeSingle(): "no row" is not an error (it returns null), so any error here is a real failure
+  const { data: academicYear, error: yearError } = await supabase
     .from('academic_years')
     .select('id, name, is_clinical')
     .eq('slug', yearSlug)
-    .single()
+    .maybeSingle()
 
+  assertQuerySucceeded(yearError, 'academic year')
   if (!academicYear || academicYear.is_clinical) notFound()
 
-  const { data: semesterData } = await supabase
+  const { data: semesterData, error: semesterError } = await supabase
     .from('semesters')
     .select('id, name')
     .eq('academic_year_id', academicYear.id)
     .eq('slug', semSlug)
-    .single()
+    .maybeSingle()
 
+  assertQuerySucceeded(semesterError, 'semester')
   if (!semesterData) notFound()
 
-  const { data: rawSubjects } = await supabase
+  const { data: rawSubjects, error: subjectsError } = await supabase
     .from('subjects')
     .select('id, name, slug, display_order, batches(id, exams(id, question_count, status, deleted_at))')
     .eq('semester_id', semesterData.id)
     .order('display_order', { ascending: true })
+
+  assertQuerySucceeded(subjectsError, 'subjects')
 
   const subjects = (rawSubjects || []).map((s: any) => {
     const exams = (s.batches ?? [])

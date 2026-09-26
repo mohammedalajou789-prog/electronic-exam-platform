@@ -1,7 +1,7 @@
 ﻿// src/app/(public)/[year]/page.tsx
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { createPublicSupabaseClient } from '@/lib/supabase/public'
+import { createPublicSupabaseClient, assertQuerySucceeded } from '@/lib/supabase/public'
 import { ChevronRight, ArrowUpRight, ArrowRight, BookOpen, Leaf, Flower2, Sun } from 'lucide-react'
 
 /**
@@ -279,32 +279,38 @@ export default async function YearPage({ params }: PageProps) {
   const { year: yearSlug } = await params
   const supabase = createPublicSupabaseClient()
 
-  const { data: academicYear } = await supabase
+  // maybeSingle(): "no row" is not an error (it returns null), so any error here is a real failure
+  const { data: academicYear, error: yearError } = await supabase
     .from('academic_years')
     .select('id, name, is_clinical')
     .eq('slug', yearSlug)
-    .single()
+    .maybeSingle()
 
+  assertQuerySucceeded(yearError, 'academic year')
   if (!academicYear) notFound()
 
   // ── PRE-CLINICAL → show semesters ─────────────────────────────────────────
   if (!academicYear.is_clinical) {
-    const { data: semesters } = await supabase
+    const { data: semesters, error: semestersError } = await supabase
       .from('semesters')
       .select('id, name, slug, display_order')
       .eq('academic_year_id', academicYear.id)
       .order('display_order', { ascending: true })
 
+    assertQuerySucceeded(semestersError, 'semesters')
+
     const semList = semesters || []
 
     // Numbers for each semester card (subjects / exams / questions).
     // Separate query so the semester list above never depends on it.
-    const { data: semSubjects } = semList.length > 0
+    const { data: semSubjects, error: semStatsError } = semList.length > 0
       ? await supabase
           .from('subjects')
           .select('id, semester_id, batches(id, exams(id, question_count, status, deleted_at))')
           .in('semester_id', semList.map(s => s.id))
-      : { data: [] as any[] }
+      : { data: [] as any[], error: null }
+
+    assertQuerySucceeded(semStatsError, 'semester stats')
 
     const statsBySem = new Map<string, { subjects: number; exams: number; questions: number }>()
     ;(semSubjects ?? []).forEach((s: any) => {
@@ -400,11 +406,13 @@ export default async function YearPage({ params }: PageProps) {
   }
 
   // ── CLINICAL → show subjects directly ─────────────────────────────────────
-  const { data: rawSubjects } = await supabase
+  const { data: rawSubjects, error: subjectsError } = await supabase
     .from('subjects')
     .select('id, name, slug, display_order, batches(id, exams(id, question_count, status, deleted_at))')
     .eq('year_id', academicYear.id)
     .order('display_order', { ascending: true })
+
+  assertQuerySucceeded(subjectsError, 'clinical subjects')
 
   const subjects = (rawSubjects || []).map(s => {
     const exams = (s.batches ?? [])
