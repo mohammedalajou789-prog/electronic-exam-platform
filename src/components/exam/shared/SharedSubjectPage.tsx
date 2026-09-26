@@ -2,10 +2,13 @@
 //
 // Shared subject dashboard. Shows the list of batches + CustomExamBuilder.
 // Used by both pre-clinical and clinical routes.
+//
+// Uses the public (cookie-less) Supabase client so the pages that render it can be cached.
+// Never add user-specific data here — the cached HTML is shared by every student.
 
 import Link from 'next/link'
 import { ChevronRight, ArrowUpRight } from 'lucide-react'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { createPublicSupabaseClient, assertQuerySucceeded } from '@/lib/supabase/public'
 import CustomExamBuilder from '@/components/exam/CustomExamBuilder'
 
 interface Props {
@@ -134,14 +137,16 @@ export default async function SharedSubjectPage({
   basePath,
   breadcrumbs,
 }: Props) {
-  const supabase = await createServerSupabaseClient()
+  const supabase = createPublicSupabaseClient()
 
   // Batches
-  const { data: rawBatches } = await supabase
+  const { data: rawBatches, error: batchesError } = await supabase
     .from('batches')
     .select('id, name, slug, display_order, exams(id, question_count, status, deleted_at)')
     .eq('subject_id', subjectId)
     .order('display_order', { ascending: true })
+
+  assertQuerySucceeded(batchesError, 'batches')
 
   const batches = (rawBatches || []).map((b: any) => {
     const pub = (b.exams ?? []).filter(
@@ -167,11 +172,14 @@ export default async function SharedSubjectPage({
   const [doctorsRes, qMeta] = await Promise.all([
     allExamIds.length > 0
       ? supabase.from('exam_doctors').select('doctor:doctors(id, name)').in('exam_id', allExamIds)
-      : Promise.resolve({ data: [] }),
+      : Promise.resolve({ data: [], error: null }),
     allExamIds.length > 0
       ? supabase.from('questions').select('chapter_id, lecture_id, chapter:chapters(id, name), lecture:lectures(id, name)').in('exam_id', allExamIds).is('deleted_at', null)
-      : Promise.resolve({ data: [] }),
+      : Promise.resolve({ data: [], error: null }),
   ])
+
+  assertQuerySucceeded(doctorsRes.error, 'subject doctors')
+  assertQuerySucceeded(qMeta.error, 'subject chapters and lectures')
 
   const doctorMap = new Map<string, string>()
   ;(doctorsRes.data ?? []).forEach((r: any) => {
