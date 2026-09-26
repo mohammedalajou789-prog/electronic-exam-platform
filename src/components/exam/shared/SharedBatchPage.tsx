@@ -2,11 +2,14 @@
 //
 // Shared component for the "batch page" — shows the list of exams inside a batch.
 // Used by both pre-clinical and clinical routes.
+//
+// Uses the public (cookie-less) Supabase client so the pages that render it can be cached.
+// Never add user-specific data here — the cached HTML is shared by every student.
 
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ChevronRight, ArrowRight, FileText, Clock } from 'lucide-react'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { createPublicSupabaseClient, assertQuerySucceeded } from '@/lib/supabase/public'
 
 interface Breadcrumb {
   label: string
@@ -192,15 +195,17 @@ export default async function SharedBatchPage({
   basePath,
   breadcrumbs,
 }: Props) {
-  const supabase = await createServerSupabaseClient()
+  const supabase = createPublicSupabaseClient()
 
-  const { data: exams } = await supabase
+  const { data: exams, error: examsError } = await supabase
     .from('exams')
     .select('*, exam_doctors(doctor:doctors(name))')
     .eq('batch_id', batchId)
     .eq('status', 'published')
     .is('deleted_at', null)
     .order('created_at', { ascending: false })
+
+  assertQuerySucceeded(examsError, 'batch exams')
 
   const examList = exams || []
 
