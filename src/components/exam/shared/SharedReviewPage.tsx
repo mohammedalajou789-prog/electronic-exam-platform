@@ -1,6 +1,13 @@
 // src/components/exam/shared/SharedReviewPage.tsx
+//
+// Review mode for regular exams (examId) and custom exams (customExamId).
+// - Regular exam: public content → public (cookie-less) client, so its review page can be cached.
+//   Never add user-specific data to that path — the cached HTML is shared by every student.
+// - Custom exam: created by one student → keeps the cookie-aware client and is never cached.
 import { notFound } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { createPublicSupabaseClient, assertQuerySucceeded } from '@/lib/supabase/public'
+import { isUuid } from '@/lib/uuid'
 import Link from 'next/link'
 import { BookOpen } from 'lucide-react'
 import ReviewQuestion from '@/components/exam/ReviewQuestion'
@@ -20,18 +27,23 @@ export default async function SharedReviewPage({
   playPath,
   breadcrumbs,
 }: Props) {
-  const supabase = await createServerSupabaseClient()
   let questions: any[] = []
 
   if (examId) {
-    const { data } = await supabase
+    if (!isUuid(examId)) notFound()
+
+    const supabase = createPublicSupabaseClient()
+    const { data, error } = await supabase
       .from('questions')
       .select('*, question_statistics(*), chapter:chapters(id, name), lecture:lectures(id, name)')
       .eq('exam_id', examId)
       .is('deleted_at', null)
       .order('question_order', { ascending: true })
+
+    assertQuerySucceeded(error, 'review questions')
     questions = data || []
   } else if (customExamId) {
+    const supabase = await createServerSupabaseClient()
     const { data: customExam } = await supabase
       .from('custom_exams')
       .select('question_ids')
