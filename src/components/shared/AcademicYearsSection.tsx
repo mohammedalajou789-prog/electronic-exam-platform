@@ -1,5 +1,7 @@
-﻿import Link from 'next/link'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+﻿// Uses the public (cookie-less) Supabase client so any page that renders it can be cached.
+// Never add user-specific data here.
+import Link from 'next/link'
+import { createPublicSupabaseClient, assertQuerySucceeded } from '@/lib/supabase/public'
 
 interface AcademicYearsSectionProps {
   title?: string
@@ -26,12 +28,14 @@ export default async function AcademicYearsSection({
   title = 'Academic years',
   subtitle = 'Pick your year to get started',
 }: AcademicYearsSectionProps): Promise<React.JSX.Element> {
-  const supabase = await createServerSupabaseClient()
+  const supabase = createPublicSupabaseClient()
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('academic_years')
     .select('id, name, slug, display_order, is_clinical')
     .order('display_order')
+
+  assertQuerySucceeded(error, 'academic years section')
 
   const years: YearCard[] = (data ?? []).map((y, i) => ({
     id: y.id,
@@ -49,7 +53,7 @@ export default async function AcademicYearsSection({
   if (preYears.length > 0) {
     phases.push({
       name: 'Pre-Clinical',
-      range: `Years 1â€“${preYears.length}`,
+      range: `Years 1–${preYears.length}`,
       clinical: false,
       years: preYears,
     })
@@ -57,7 +61,7 @@ export default async function AcademicYearsSection({
   if (cliYears.length > 0) {
     phases.push({
       name: 'Clinical',
-      range: `Years ${preYears.length + 1}â€“${years.length}`,
+      range: `Years ${preYears.length + 1}–${years.length}`,
       clinical: true,
       years: cliYears,
     })
@@ -75,7 +79,7 @@ export default async function AcademicYearsSection({
         .ay-inner { max-width: 1280px; margin: 0 auto; display: flex; flex-direction: column; gap: 36px; }
         .ay-mono  { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
 
-        /* â”€â”€ Head â”€â”€ */
+        /* ── Head ── */
         .ay-head    { display: flex; align-items: flex-end; justify-content: space-between; gap: 40px; flex-wrap: wrap; }
         .ay-eyebrow { font-size: 12.5px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--clr-primary); }
         .ay-title   { margin: 0; font-size: 36px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; }
@@ -84,7 +88,7 @@ export default async function AcademicYearsSection({
         .ay-legend span { display: inline-flex; align-items: center; gap: 8px; }
         .ay-swatch  { width: 12px; height: 12px; border-radius: 4px; border: 2px solid; }
 
-        /* â”€â”€ Layout â”€â”€ */
+        /* ── Layout ── */
         .ay-grid  { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px; align-items: start; }
         .ay-phase { display: flex; flex-direction: column; gap: 10px; }
         .ay-phase-head { display: flex; align-items: baseline; justify-content: space-between; padding: 0 2px; }
@@ -93,7 +97,7 @@ export default async function AcademicYearsSection({
         .ay-phase-bar  { height: 4px; border-radius: 999px; }
         .ay-phase-years { display: grid; gap: 16px; }
 
-        /* â”€â”€ Card â”€â”€ */
+        /* ── Card ── */
         .ay-card {
           position: relative; overflow: hidden; box-sizing: border-box;
           height: 236px; padding: 20px; border-radius: 20px;
@@ -126,14 +130,14 @@ export default async function AcademicYearsSection({
         .ay-icon-desktop { display: block; }
         .ay-icon-mobile  { display: none; }
 
-        /* â”€â”€ Empty â”€â”€ */
+        /* ── Empty ── */
         .ay-empty {
           display: flex; flex-direction: column; align-items: center; justify-content: center;
           gap: 8px; padding: 64px 24px; border: 1.5px dashed var(--bd);
           border-radius: 20px; text-align: center;
         }
 
-        /* â”€â”€ Mobile â”€â”€ */
+        /* ── Mobile ── */
         @media (max-width: 860px) {
           .ay-section { padding: 36px 18px 40px; }
           .ay-inner   { gap: 26px; }

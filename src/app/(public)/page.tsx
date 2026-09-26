@@ -1,5 +1,4 @@
-import { redirect } from 'next/navigation'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { createPublicSupabaseClient, assertQuerySucceeded } from '@/lib/supabase/public'
 import AcademicYearsSection from '@/components/shared/AcademicYearsSection'
 import {
   ArrowRight, Play, Check, X, Bookmark, Lightbulb, RotateCcw, Shuffle, Target,
@@ -304,13 +303,17 @@ const HOME_CSS = `
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
-export default async function HomePage() {
-  const supabase = await createServerSupabaseClient()
+/**
+ * Caching: the home page is the same for every guest, so it is built once and served from cache.
+ * It is rebuilt at most every 5 minutes, so the numbers and years stay up to date within 5 minutes.
+ *
+ * Logged-in students never see this page: src/proxy.ts sends them to /dashboard
+ * before this cached page is served. Never add user-specific data here.
+ */
+export const revalidate = 300
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (user) {
-    redirect('/dashboard')
-  }
+export default async function HomePage() {
+  const supabase = createPublicSupabaseClient()
 
   const [yearsRes, subjectsRes, examsRes, doctorsRes] = await Promise.all([
     supabase.from('academic_years').select('id', { count: 'exact', head: true }),
@@ -318,6 +321,11 @@ export default async function HomePage() {
     supabase.from('exams').select('id', { count: 'exact', head: true }),
     supabase.from('doctors').select('id', { count: 'exact', head: true }),
   ])
+
+  assertQuerySucceeded(yearsRes.error, 'home: years count')
+  assertQuerySucceeded(subjectsRes.error, 'home: subjects count')
+  assertQuerySucceeded(examsRes.error, 'home: exams count')
+  assertQuerySucceeded(doctorsRes.error, 'home: doctors count')
 
   const stats = [
     { value: yearsRes.count ?? 0,    label: 'Years'    },

@@ -41,6 +41,12 @@ export async function proxy(request: NextRequest) {
   const { data: claimsData } = await supabase.auth.getClaims()
   const userId = typeof claimsData?.claims?.sub === 'string' ? claimsData.claims.sub : null
 
+  // Logged-in students skip the public home page and go straight to their dashboard.
+  // This check lives here (not in the home page) so the home page itself can be cached for guests.
+  if (pathname === '/' && userId) {
+    return NextResponse.redirect(new URL('/dashboard', request.url))
+  }
+
   const isAdminArea = pathname.startsWith('/admin') || pathname.startsWith('/api/admin')
 
   if (isAdminArea) {
@@ -83,5 +89,6 @@ function denyAdmin(request: NextRequest, pathname: string) {
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/api/admin/:path*', '/dashboard/:path*'],
+  // '/' is included only for the logged-in → /dashboard redirect above.
+  matcher: ['/', '/admin/:path*', '/api/admin/:path*', '/dashboard/:path*'],
 }

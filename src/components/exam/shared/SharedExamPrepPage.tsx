@@ -1,6 +1,7 @@
 ﻿// src/components/exam/shared/SharedExamPrepPage.tsx
-export const dynamic = 'force-dynamic'
-export const revalidate = 0
+//
+// Exam preparation page. It is NOT cached: logged-in students see their own saved progress
+// (the "Continue" box). To keep it fast, everything it needs is fetched in parallel.
 
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
@@ -14,6 +15,15 @@ interface Breadcrumb {
   label: string
   href?: string
 }
+
+/** The part of study_progress this page shows in the "Continue" box */
+interface SavedProgress {
+  current_question: number | null
+  answers_json: Record<string, string> | null
+  elapsed_seconds: number | null
+}
+
+type ServerSupabaseClient = Awaited<ReturnType<typeof createServerSupabaseClient>>
 
 interface Props {
   examId?: string
@@ -235,6 +245,35 @@ const PREP_CSS = `
 
 `
 
+/**
+ * Returns the logged-in student's unfinished attempt at this exam, or null
+ * (guest, no attempt yet, or an attempt with no answers).
+ *
+ * getClaims() checks the session locally with the project's public signing key,
+ * so it does not need a network call to Supabase Auth (unlike getUser()).
+ */
+async function loadSavedProgress(
+  supabase: ServerSupabaseClient,
+  examId: string
+): Promise<SavedProgress | null> {
+  const { data: claimsData } = await supabase.auth.getClaims()
+  const userId = typeof claimsData?.claims?.sub === 'string' ? claimsData.claims.sub : null
+  if (!userId) return null
+
+  const { data: progress } = await supabase
+    .from('study_progress')
+    .select('current_question, answers_json, elapsed_seconds')
+    .eq('user_id', userId)
+    .eq('exam_id', examId)
+    .eq('completed', false)
+    .maybeSingle()
+
+  if (progress && Object.keys(progress.answers_json || {}).length > 0) {
+    return progress as SavedProgress
+  }
+  return null
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default async function SharedExamPrepPage({
@@ -252,17 +291,28 @@ export default async function SharedExamPrepPage({
   let calendarYear: number | null = null
   let doctors: string[] = []
   let chapters: string[] = []
-  let savedProgress: any = null
+  let savedProgress: SavedProgress | null = null
 
   if (examId) {
-    const { data: exam, error: examError } = await supabase
-      .from('exams')
-      .select('*, exam_doctors(doctor:doctors(name))')
-      .eq('id', examId)
-      .eq('status', 'published')
-      .is('deleted_at', null)
-      .single()
+    // These three don't depend on each other, so they run at the same time:
+    // one round trip to Supabase instead of three or four in a row.
+    const [examRes, chaptersRes, progressRes] = await Promise.all([
+      supabase
+        .from('exams')
+        .select('*, exam_doctors(doctor:doctors(name))')
+        .eq('id', examId)
+        .eq('status', 'published')
+        .is('deleted_at', null)
+        .single(),
+      supabase
+        .from('questions')
+        .select('chapter:chapters(id, name)')
+        .eq('exam_id', examId)
+        .not('chapter_id', 'is', null),
+      loadSavedProgress(supabase, examId),
+    ])
 
+    const { data: exam, error: examError } = examRes
     if (!exam) {
       console.error('[SharedExamPrepPage] Exam query failed:', examError)
       notFound()
@@ -276,11 +326,7 @@ export default async function SharedExamPrepPage({
       ?.map((ed: any) => ed.doctor?.name)
       .filter(Boolean) || []
 
-    const { data: qChapters } = await supabase
-      .from('questions')
-      .select('chapter:chapters(id, name)')
-      .eq('exam_id', examId)
-      .not('chapter_id', 'is', null)
+    const { data: qChapters } = chaptersRes
 
     const chapterNames = new Set<string>()
     ;(qChapters || []).forEach((q: any) => {
@@ -289,20 +335,7 @@ export default async function SharedExamPrepPage({
     })
     chapters = Array.from(chapterNames)
 
-    // saved progress
-    const { data: { user } } = await supabase.auth.getUser()
-    if (user) {
-      const { data: prog } = await supabase
-        .from('study_progress')
-        .select('current_question, answers_json, elapsed_seconds')
-        .eq('user_id', user.id)
-        .eq('exam_id', examId)
-        .eq('completed', false)
-        .maybeSingle()
-      if (prog && Object.keys(prog.answers_json || {}).length > 0) {
-        savedProgress = prog
-      }
-    }
+    savedProgress = progressRes
 
   } else if (customExamId) {
     const { data: customExam } = await supabase
