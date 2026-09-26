@@ -4,7 +4,26 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
-import { Eye, EyeOff, ArrowLeft } from 'lucide-react'
+import {
+  Eye, EyeOff, ArrowLeft, User, IdCard, Phone, Mail, Lock, Users,
+  ChevronDown, AlertCircle, CircleCheck, Loader2, ArrowRight,
+} from 'lucide-react'
+
+// Styles for this form live in the auth layout (app/(auth)/layout.tsx).
+
+/** Visual-only password hint: 0 = empty, 1 = too short … 4 = strong */
+function strengthOf(pw: string) {
+  if (!pw) return { level: 0, label: '', color: 'var(--track)' }
+  if (pw.length < 6) return { level: 1, label: 'Too short', color: 'var(--clr-primary)' }
+  let score = 2
+  if (pw.length >= 10) score++
+  if (/\d/.test(pw) && /[^A-Za-z0-9]|[A-Z]/.test(pw)) score++
+  return score >= 4
+    ? { level: 4, label: 'Strong', color: 'var(--ok)' }
+    : score === 3
+      ? { level: 3, label: 'Good', color: 'var(--accent-blue)' }
+      : { level: 2, label: 'Okay', color: 'var(--warn)' }
+}
 
 export default function RegisterPage() {
   const [displayName, setDisplayName] = useState('')
@@ -66,195 +85,149 @@ export default function RegisterPage() {
     router.refresh()
   }
 
-  const inp = {
-    width: '100%', padding: '11px 14px', borderRadius: 10,
-    border: '1px solid var(--bd)', background: 'var(--bg-soft)',
-    color: 'var(--fg)', fontFamily: 'inherit', fontSize: 14,
-    outline: 'none', marginBottom: 16, boxSizing: 'border-box' as const,
-  }
-
-  const lbl = {
-    display: 'block', fontSize: 12.5, fontWeight: 700,
-    color: 'var(--fg)', marginBottom: 6,
-  }
+  const strength = strengthOf(password)
+  const locked = loading || notice !== ''
 
   return (
-    <div style={{
-      minHeight: '100vh', display: 'flex',
-      background: 'var(--bg)',
-      fontFamily: '"Plus Jakarta Sans", system-ui, sans-serif',
-    }}>
-      <style>{`
-        .reg-left  { display: flex; }
-        .reg-right { flex: 1 1 0%; }
-        .reg-mobile-logo { display: none; }
-
-        @media (max-width: 768px) {
-          .reg-left        { display: none; }
-          .reg-mobile-logo { display: flex !important; }
-          .reg-right {
-            padding: 28px 22px 48px !important;
-            align-items: flex-start !important;
-            justify-content: flex-start !important;
-          }
-        }
-      `}</style>
-
-      {/* ── Left panel (desktop only) ── */}
-      <div className="reg-left" style={{
-        flex: '1 1 0%', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center',
-        background: 'var(--clr-primary)', color: '#fff',
-        padding: '60px 48px', position: 'relative', overflow: 'hidden',
-      }}>
-        <div style={{ position: 'absolute', top: -80, right: -80, width: 280, height: 280, borderRadius: '50%', background: 'rgba(255,255,255,0.06)', pointerEvents: 'none' }} />
-        <div style={{ position: 'absolute', bottom: -60, left: -60, width: 220, height: 220, borderRadius: '50%', background: 'rgba(255,255,255,0.05)', pointerEvents: 'none' }} />
-
-        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', width: '100%', maxWidth: 360 }}>
-          <img src="/images/logo.jpg" alt="Medical Club"
-            style={{ width: 110, height: 110, borderRadius: '50%', objectFit: 'cover', boxShadow: '0 8px 32px rgba(0,0,0,0.25)', marginBottom: 28 }} />
-          <h2 style={{ margin: '0 0 10px', fontSize: 30, fontWeight: 800 }}>Medical Club</h2>
-          <p style={{ margin: '0 0 6px', fontSize: 15, opacity: 0.85, fontWeight: 600 }}>Faculty of Medicine</p>
-          <p style={{ margin: '0 0 36px', fontSize: 14, opacity: 0.7 }}>Hashemite University</p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%' }}>
-            {[
-              { icon: '📚', text: 'Comprehensive question bank' },
-              { icon: '📊', text: 'Track your performance' },
-              { icon: '📝', text: 'Practice previous exams' },
-            ].map(item => (
-              <div key={item.text} style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'rgba(255,255,255,0.1)', borderRadius: 12, padding: '12px 16px', textAlign: 'left' }}>
-                <span style={{ fontSize: 18 }}>{item.icon}</span>
-                <span style={{ fontSize: 13.5, fontWeight: 600, opacity: 0.9 }}>{item.text}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+    <>
+      <div className="au-head">
+        <span className="au-eyebrow a-rise">Create account</span>
+        <h1 className="au-h1 a-rise" style={{ ['--i' as string]: 1 } as React.CSSProperties}>Join Medical Club</h1>
+        <p className="au-sub a-rise" style={{ ['--i' as string]: 2 } as React.CSSProperties}>
+          Registration unlocks bookmarks, history and statistics. It takes less than a minute.
+        </p>
       </div>
 
-      {/* ── Right panel ── */}
-      <div className="reg-right" style={{
-        display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'flex-start',
-        padding: '40px 48px', background: 'var(--bg)',
-        overflowY: 'auto', maxHeight: '100vh',
-      }}>
-        <div style={{ width: '100%', maxWidth: 420, paddingTop: 12 }}>
+      <form onSubmit={handleSubmit} className="au-form a-rise" style={{ ['--i' as string]: 3 } as React.CSSProperties}>
 
-          {/* Mobile: logo */}
-          <div className="reg-mobile-logo" style={{
-            flexDirection: 'column', alignItems: 'center',
-            marginBottom: 28,
-          }}>
-            <img src="/images/logo.jpg" alt="Medical Club"
-              style={{ width: 64, height: 64, borderRadius: '50%', objectFit: 'cover', marginBottom: 10, boxShadow: '0 4px 16px rgba(196,18,48,0.2)' }} />
-            <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--fg)' }}>Medical Club</div>
-            <div style={{ fontSize: 11.5, color: 'var(--fg-muted)', marginTop: 2 }}>
-              Faculty of Medicine — Hashemite University
-            </div>
-          </div>
+        {/* ── About you ── */}
+        <div className="au-group">
+          <span className="au-group-title">About you</span>
 
-          {/* Heading */}
-          <div style={{ marginBottom: 24 }}>
-            <h1 style={{ margin: '0 0 5px', fontSize: 24, fontWeight: 800, color: 'var(--fg)' }}>
-              Create your account
-            </h1>
-            <p style={{ margin: 0, fontSize: 13, color: 'var(--fg-muted)' }}>
-              Registration unlocks bookmarks, history, and statistics
-            </p>
-          </div>
-
-          <form onSubmit={handleSubmit}>
-
-            {/* Display Name */}
-            <label style={lbl}>Display Name</label>
-            <input type="text" placeholder="e.g. Mohammed El-Ajou"
-              value={displayName} onChange={e => setDisplayName(e.target.value)}
-              required style={inp} />
-
-            {/* University ID */}
-            <label style={lbl}>University ID</label>
-            <input type="text" placeholder="e.g. 2135752"
-              value={universityId} onChange={e => setUniversityId(e.target.value)}
-              style={inp} />
-
-            {/* Phone */}
-            <label style={lbl}>Phone Number</label>
-            <input type="tel" placeholder="e.g. 0791993470"
-              value={phone} onChange={e => setPhone(e.target.value)}
-              style={inp} />
-
-            {/* Email */}
-            <label style={lbl}>Email Address</label>
-            <input type="email" placeholder="you@example.com"
-              value={email} onChange={e => setEmail(e.target.value)}
-              required style={inp} />
-
-            {/* Password */}
-            <label style={lbl}>Password</label>
-            <div style={{ position: 'relative', marginBottom: 16 }}>
+          <label className="au-label">
+            Display name
+            <span className="au-field">
+              <User size={17} />
               <input
-                type={showPassword ? 'text' : 'password'}
-                placeholder="At least 6 characters"
-                value={password} onChange={e => setPassword(e.target.value)}
-                required
-                style={{ ...inp, marginBottom: 0, padding: '11px 40px 11px 14px' }}
+                type="text" className="au-input" placeholder="e.g. Mohammed El-Ajou" autoComplete="name"
+                value={displayName} onChange={e => setDisplayName(e.target.value)} required
               />
-              <button type="button" onClick={() => setShowPassword(!showPassword)}
-                style={{ position: 'absolute', top: '50%', right: 12, transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--fg-muted)', cursor: 'pointer', display: 'flex', padding: 0 }}>
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
+            </span>
+          </label>
 
-            {/* Batch */}
-            <label style={lbl}>Batch</label>
-            <select value={batch} onChange={e => setBatch(e.target.value)}
-              style={{ ...inp, cursor: 'pointer', appearance: 'auto' }}>
-              <option value="">Select your batch</option>
-              {batches.map(b => <option key={b} value={b}>{b}</option>)}
-              <option value="outside">I&apos;m from outside Hashemite University</option>
-              <option value="other">Other</option>
-            </select>
+          <div className="au-grid-2">
+            <label className="au-label">
+              <span>University ID <em>· optional</em></span>
+              <span className="au-field">
+                <IdCard size={17} />
+                <input
+                  type="text" className="au-input" placeholder="e.g. 2135752" inputMode="numeric"
+                  value={universityId} onChange={e => setUniversityId(e.target.value)}
+                />
+              </span>
+            </label>
 
-            {/* Error */}
-            {error && (
-              <div style={{ marginBottom: 14, padding: '10px 14px', borderRadius: 10, background: '#fff1f1', border: '1px solid #fecaca', color: '#dc2626', fontSize: 13, fontWeight: 600 }}>
-                {error}
-              </div>
-            )}
+            <label className="au-label">
+              <span>Phone <em>· optional</em></span>
+              <span className="au-field">
+                <Phone size={17} />
+                <input
+                  type="tel" className="au-input" placeholder="e.g. 0791993470" autoComplete="tel"
+                  value={phone} onChange={e => setPhone(e.target.value)}
+                />
+              </span>
+            </label>
+          </div>
 
-            {/* Success notice (email confirmation) */}
-            {notice && (
-              <div style={{ marginBottom: 14, padding: '10px 14px', borderRadius: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#15803d', fontSize: 13, fontWeight: 600 }}>
-                {notice}
-              </div>
-            )}
-
-            {/* Submit */}
-            <button type="submit" disabled={loading || notice !== ''} style={{
-              width: '100%', padding: '12px', borderRadius: 11,
-              border: 'none', background: 'var(--clr-primary)', color: '#fff',
-              fontFamily: 'inherit', fontSize: 15, fontWeight: 700,
-              cursor: loading || notice !== '' ? 'not-allowed' : 'pointer',
-              opacity: loading || notice !== '' ? 0.7 : 1, marginBottom: 14,
-            }}>
-              {loading ? 'Creating account...' : 'Create Account'}
-            </button>
-
-            <p style={{ textAlign: 'center', fontSize: 13.5, color: 'var(--fg-muted)', margin: '0 0 12px' }}>
-              Already have an account?{' '}
-              <Link href="/login" style={{ color: 'var(--clr-primary)', fontWeight: 700, textDecoration: 'none' }}>
-                Sign in
-              </Link>
-            </p>
-
-            <p style={{ textAlign: 'center', margin: 0 }}>
-              <Link href="/" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 13, color: 'var(--fg-muted)', textDecoration: 'none' }}>
-                <ArrowLeft size={13} /> Back to home
-              </Link>
-            </p>
-          </form>
+          <label className="au-label">
+            <span>Batch <em>· optional</em></span>
+            <span className="au-field">
+              <Users size={17} />
+              <select className={`au-input${batch ? '' : ' is-empty'}`} value={batch} onChange={e => setBatch(e.target.value)}>
+                <option value="">Select your batch</option>
+                {batches.map(b => <option key={b} value={b}>{b}</option>)}
+                <option value="outside">I&apos;m from outside Hashemite University</option>
+                <option value="other">Other</option>
+              </select>
+              <ChevronDown size={16} className="au-chev" />
+            </span>
+          </label>
         </div>
-      </div>
-    </div>
+
+        {/* ── Account ── */}
+        <div className="au-group">
+          <span className="au-group-title">Account</span>
+
+          <label className="au-label">
+            Email address
+            <span className="au-field">
+              <Mail size={17} />
+              <input
+                type="email" className="au-input" placeholder="you@example.com" autoComplete="email"
+                value={email} onChange={e => setEmail(e.target.value)} required
+              />
+            </span>
+          </label>
+
+          <label className="au-label">
+            Password
+            <span className="au-field">
+              <Lock size={17} />
+              <input
+                type={showPassword ? 'text' : 'password'} className="au-input has-toggle"
+                placeholder="At least 6 characters" autoComplete="new-password"
+                value={password} onChange={e => setPassword(e.target.value)} required
+              />
+              <button
+                type="button" className="au-eye"
+                onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+              </button>
+            </span>
+            {password && (
+              <span className="au-meter" aria-live="polite">
+                <span className="au-meter-bars">
+                  {[1, 2, 3, 4].map(n => (
+                    <i key={n} style={{ background: n <= strength.level ? strength.color : undefined }} />
+                  ))}
+                </span>
+                <span style={{ color: strength.color }}>{strength.label}</span>
+              </span>
+            )}
+          </label>
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div className="au-alert au-alert-error a-pop" role="alert">
+            <AlertCircle size={16} />
+            {error}
+          </div>
+        )}
+
+        {/* Success notice (email confirmation) */}
+        {notice && (
+          <div className="au-alert au-alert-ok a-pop" role="status">
+            <CircleCheck size={16} />
+            {notice}
+          </div>
+        )}
+
+        {/* Submit */}
+        <button type="submit" disabled={locked} className="au-submit press">
+          {loading
+            ? <><Loader2 size={17} className="a-spin" />Creating account…</>
+            : <>Create account<ArrowRight size={17} strokeWidth={2.4} /></>}
+        </button>
+
+        <div className="au-divider">Already have an account?</div>
+
+        <Link href="/login" className="au-alt press">Sign in</Link>
+
+        <Link href="/" className="au-back"><ArrowLeft size={14} />Back to home</Link>
+      </form>
+    </>
   )
 }
