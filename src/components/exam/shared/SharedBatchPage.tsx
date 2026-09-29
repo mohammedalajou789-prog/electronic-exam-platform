@@ -17,7 +17,8 @@ interface Breadcrumb {
 }
 
 interface Props {
-  batchId: string
+  subjectId: string
+  batchSlug: string
   batchName: string
   subjectName: string
   basePath: string                // e.g. /first-year/basic/first-semester/anatomy/wared
@@ -189,7 +190,8 @@ const BATCH_CSS = `
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default async function SharedBatchPage({
-  batchId,
+  subjectId,
+  batchSlug,
   batchName,
   subjectName,
   basePath,
@@ -197,10 +199,12 @@ export default async function SharedBatchPage({
 }: Props) {
   const supabase = createPublicSupabaseClient()
 
+  // The exams of this subject whose batch has this slug (every batch name has one slug)
   const { data: exams, error: examsError } = await supabase
     .from('exams')
-    .select('*, exam_doctors(doctor:doctors(name))')
-    .eq('batch_id', batchId)
+    .select('*, exam_doctors(doctor:doctors(name)), batches!inner(slug)')
+    .eq('subject_id', subjectId)
+    .eq('batches.slug', batchSlug)
     .eq('status', 'published')
     .is('deleted_at', null)
     .order('created_at', { ascending: false })

@@ -23,21 +23,19 @@ export async function GET(request: NextRequest) {
     // Get all published exams for this subject
     let examQuery = supabase
       .from('exams')
-      .select('id, batch_id')
+      .select('id, batches!inner(slug)')
+      .eq('subject_id', subjectId)
       .eq('status', 'published')
       .is('deleted_at', null)
-      .in(
-        'batch_id',
-        (
-          await supabase
-            .from('batches')
-            .select('id')
-            .eq('subject_id', subjectId)
-        ).data?.map(b => b.id) || []
-      )
 
     if (batchIds.length > 0) {
-      examQuery = examQuery.in('batch_id', batchIds)
+      // The builder sends batch ids; exams are matched by the batches' slugs
+      // (every batch name has one slug)
+      const { data: chosenBatches } = await supabase
+        .from('batches')
+        .select('slug')
+        .in('id', batchIds)
+      examQuery = examQuery.in('batches.slug', (chosenBatches ?? []).map(b => b.slug))
     }
 
     if (doctorIds.length > 0) {

@@ -2,6 +2,7 @@
 import { redirect } from 'next/navigation'
 import AddAdminForm from '@/components/admin/AddAdminForm'
 import DeleteAdminButton from '@/components/admin/DeleteAdminButton'
+import { uniqueBatchNames } from '@/lib/batch-order'
 
 async function getAdministrators() {
   const supabase = await createServerSupabaseClient()
@@ -16,9 +17,12 @@ async function getBatches() {
   const supabase = await createServerSupabaseClient()
   const { data: batches } = await supabase
     .from('batches')
-    .select('name')
-    .order('name', { ascending: true })
-  return [...new Set((batches || []).map((b: { name: string }) => b.name))]
+    .select('name, graduation_year')
+    // Batches without a graduation year (e.g. "Previous Batches") only group
+    // old, unsorted exams; a person cannot belong to them
+    .not('graduation_year', 'is', null)
+  // Newest graduation year first, each name once
+  return uniqueBatchNames(batches || [])
 }
 
 export default async function AdministratorsPage() {

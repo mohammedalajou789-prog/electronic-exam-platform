@@ -10,6 +10,20 @@ import Link from 'next/link'
 import { ChevronRight, ArrowUpRight } from 'lucide-react'
 import { createPublicSupabaseClient, assertQuerySucceeded } from '@/lib/supabase/public'
 import CustomExamBuilder from '@/components/exam/CustomExamBuilder'
+import { compareBatches } from '@/lib/batch-order'
+
+interface LinkedBatchRow {
+  id: string
+  name: string
+  slug: string
+  graduation_year: number | null
+}
+
+interface SubjectExamRow {
+  id: string
+  question_count: number | null
+  batches: { slug: string } | null
+}
 
 interface Props {
   subjectId: string
@@ -139,35 +153,51 @@ export default async function SharedSubjectPage({
 }: Props) {
   const supabase = createPublicSupabaseClient()
 
-  // Batches
-  const { data: rawBatches, error: batchesError } = await supabase
-    .from('batches')
-    .select('id, name, slug, display_order, exams(id, question_count, status, deleted_at)')
-    .eq('subject_id', subjectId)
-    .order('display_order', { ascending: true })
+  // Batches linked to this subject, and the subject's published exams.
+  // An exam is matched to its batch by slug (every batch name has one slug),
+  // so the counts are right whether an exam points to the shared batch row or not.
+  const [linksRes, examsRes] = await Promise.all([
+    supabase
+      .from('subject_batches')
+      .select('batch:batches(id, name, slug, graduation_year)')
+      .eq('subject_id', subjectId),
+    supabase
+      .from('exams')
+      .select('id, question_count, batches(slug)')
+      .eq('subject_id', subjectId)
+      .eq('status', 'published')
+      .is('deleted_at', null),
+  ])
 
-  assertQuerySucceeded(batchesError, 'batches')
+  assertQuerySucceeded(linksRes.error, 'batches')
+  assertQuerySucceeded(examsRes.error, 'subject exams')
 
-  const batches = (rawBatches || []).map((b: any) => {
-    const pub = (b.exams ?? []).filter(
-      (e: any) => e.status === 'published' && !e.deleted_at
-    )
-    return {
-      ...b,
-      examCount: pub.length,
-      totalQuestions: pub.reduce((n: number, e: any) => n + (e.question_count ?? 0), 0),
-    }
-  })
+  const examRows = (examsRes.data ?? []) as unknown as SubjectExamRow[]
+  const examsBySlug = new Map<string, SubjectExamRow[]>()
+  for (const exam of examRows) {
+    const slug = exam.batches?.slug
+    if (!slug) continue
+    examsBySlug.set(slug, [...(examsBySlug.get(slug) ?? []), exam])
+  }
+
+  const batches = ((linksRes.data ?? []) as unknown as { batch: LinkedBatchRow | null }[])
+    .map(link => link.batch)
+    .filter((b): b is LinkedBatchRow => b !== null)
+    .sort(compareBatches)
+    .map(b => {
+      const batchExams = examsBySlug.get(b.slug) ?? []
+      return {
+        ...b,
+        examCount: batchExams.length,
+        totalQuestions: batchExams.reduce((n, e) => n + (e.question_count ?? 0), 0),
+      }
+    })
 
   const totalExams = batches.reduce((n: number, b: any) => n + b.examCount, 0)
   const totalQuestions = batches.reduce((n: number, b: any) => n + b.totalQuestions, 0)
 
   // Doctors & chapters for Custom Exam Builder
-  const allExamIds = batches.flatMap((b: any) =>
-    (b.exams ?? [])
-      .filter((e: any) => e.status === 'published' && !e.deleted_at)
-      .map((e: any) => e.id)
-  )
+  const allExamIds = examRows.map(e => e.id)
 
   const [doctorsRes, qMeta] = await Promise.all([
     allExamIds.length > 0

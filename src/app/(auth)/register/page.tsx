@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { uniqueBatchNames } from '@/lib/batch-order'
 import {
   Eye, EyeOff, ArrowLeft, User, IdCard, Phone, Mail, Lock, Users,
   ChevronDown, AlertCircle, CircleCheck, Loader2, ArrowRight,
@@ -42,9 +43,13 @@ export default function RegisterPage() {
   useEffect(() => {
     const supabase = createClient()
     supabase
-      .from('batches').select('name').order('name', { ascending: true })
+      .from('batches').select('name, graduation_year')
+      // Batches without a graduation year (e.g. "Previous Batches") only group
+      // old, unsorted exams; a student cannot belong to them
+      .not('graduation_year', 'is', null)
       .then(({ data }) => {
-        if (data) setBatches(data.map((b: { name: string }) => b.name))
+        // Newest graduation year first, each name once
+        if (data) setBatches(uniqueBatchNames(data))
       })
   }, [])
 

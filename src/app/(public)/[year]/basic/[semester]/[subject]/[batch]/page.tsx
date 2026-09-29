@@ -55,19 +55,22 @@ export default async function BasicBatchPage({ params }: PageProps) {
   assertQuerySucceeded(subjectError, 'subject')
   if (!subject) notFound()
 
-  const { data: batch, error: batchError } = await supabase
-    .from('batches')
-    .select('id, name')
+  // The batch must be linked to this subject; otherwise the URL does not exist
+  const { data: link, error: batchError } = await supabase
+    .from('subject_batches')
+    .select('batches!inner(name)')
     .eq('subject_id', subject.id)
-    .eq('slug', batchSlug)
+    .eq('batches.slug', batchSlug)
     .maybeSingle()
 
   assertQuerySucceeded(batchError, 'batch')
+  const batch = (link as unknown as { batches: { name: string } | null } | null)?.batches
   if (!batch) notFound()
 
   return (
     <SharedBatchPage
-      batchId={batch.id}
+      subjectId={subject.id}
+      batchSlug={batchSlug}
       batchName={batch.name}
       subjectName={subject.name}
       basePath={`/${yearSlug}/basic/${semSlug}/${subSlug}/${batchSlug}`}
