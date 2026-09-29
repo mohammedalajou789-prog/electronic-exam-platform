@@ -218,7 +218,7 @@ export default function ContentManagementPage() {
   // ── Load ──────────────────────────────────────────────────────────────────
 
   const loadAll = useCallback(async () => {
-    const [yearsRes, semsRes, subsRes, batchesRes, examsRes, questionsCountRes, doctorsRes] = await Promise.all([
+    const [yearsRes, semsRes, subsRes, batchesRes, examsRes, doctorsRes] = await Promise.all([
       supabase.from('academic_years').select('id, name, is_clinical').order('display_order'),
       supabase.from('semesters').select('*').order('display_order'),
       supabase.from('subjects').select(`
@@ -229,7 +229,6 @@ export default function ContentManagementPage() {
       `).order('name'),
       supabase.from('batches').select('id, name, slug, graduation_year, created_at').order('created_at'),
       supabase.from('exams').select('*').order('created_at', { ascending: false }),
-      supabase.from('questions').select('id, exam_id').is('deleted_at', null),
       supabase.from('doctors').select('id, name, department').order('name'),
     ])
     setAcademicYears(yearsRes.data || [])
@@ -272,14 +271,9 @@ export default function ContentManagementPage() {
     }
     setBatchExamCounts(perBatch)
     setPairExamCounts(perPair)
-    const allQuestions = questionsCountRes.data || []
-
-    // بناء map: exam_id → عدد الأسئلة الحقيقي
-    const questionCountMap: Record<string, number> = {}
-    for (const q of allQuestions) {
-      questionCountMap[q.exam_id] = (questionCountMap[q.exam_id] || 0) + 1
-    }
-
+    // exams.question_count is kept up to date by the database trigger
+    // trigger_update_question_count (not-deleted questions only), so the
+    // questions themselves are not fetched here (the API returns 1000 rows at most).
     const enrichedExams = rawExams.map((exam: any) => {
       // The exam's subject comes from exams.subject_id; its batch only gives the batch name
       const batch = batchesData.find((b: BatchRow) => b.id === exam.batch_id) || null
@@ -288,7 +282,7 @@ export default function ContentManagementPage() {
         ...exam,
         batch,
         subject,
-        question_count: questionCountMap[exam.id] || 0,
+        question_count: exam.question_count ?? 0,
       }
     })
     setExams(enrichedExams)
@@ -425,25 +419,43 @@ export default function ContentManagementPage() {
     await loadAll(); showToast('Chapter added'); setIsLoading(false)
   }
 
+  /**
+   * Counts the questions (active and soft-deleted) matching a PostgREST "or" filter.
+   * Returns null when the check itself failed, so nothing is deleted on a failed check.
+   */
+  async function countQuestionUse(orFilter: string): Promise<{ active: number; deleted: number } | null> {
+    const [activeRes, deletedRes] = await Promise.all([
+      supabase.from('questions').select('id', { count: 'exact', head: true }).or(orFilter).is('deleted_at', null),
+      supabase.from('questions').select('id', { count: 'exact', head: true }).or(orFilter).not('deleted_at', 'is', null),
+    ])
+    if (activeRes.error || deletedRes.error) return null
+    return { active: activeRes.count ?? 0, deleted: deletedRes.count ?? 0 }
+  }
+
+  function questionUseText(use: { active: number; deleted: number }): string {
+    const parts: string[] = []
+    if (use.active > 0) parts.push(`${use.active} question(s)`)
+    if (use.deleted > 0) parts.push(`${use.deleted} deleted question(s)`)
+    return parts.join(' and ')
+  }
+
   async function deleteChapter(chapterId: string) {
     const subject = subjects.find(s => s.chapters.some(c => c.id === chapterId))
     const chapter = subject?.chapters.find(c => c.id === chapterId)
     if (!subject || !chapter) return
 
-    const examIds = exams.filter(e => e.subject_id === subject.id).map(e => e.id)
-
-    let usedCount = 0
-    if (examIds.length > 0) {
-      const { count } = await supabase
-        .from('questions')
-        .select('id', { count: 'exact', head: true })
-        .in('exam_id', examIds)
-        .eq('chapter', chapter.name)
-        .is('deleted_at', null)
-      usedCount = count || 0
+    // Deleting a chapter also deletes its lectures, so their questions count too.
+    // Soft-deleted questions count as well: they can be restored and keep their tags.
+    const lectureIds = (chapter.lectures || []).map(l => l.id)
+    const use = await countQuestionUse(
+      `chapter_id.eq.${chapter.id}` + (lectureIds.length > 0 ? `,lecture_id.in.(${lectureIds.join(',')})` : '')
+    )
+    if (!use) {
+      showToast('Could not check whether this chapter is in use. Nothing was deleted.', 'error')
+      return
     }
-    if (usedCount > 0) {
-      showToast(`Cannot delete: ${usedCount} question(s) are tagged with this chapter.`, 'error')
+    if (use.active + use.deleted > 0) {
+      showToast(`Cannot delete: ${questionUseText(use)} use this chapter or its lectures.`, 'error')
       return
     }
 
@@ -474,20 +486,14 @@ export default function ContentManagementPage() {
     const lecture = chapter?.lectures.find(l => l.id === lectureId)
     if (!subject || !lecture) return
 
-    const examIds = exams.filter(e => e.subject_id === subject.id).map(e => e.id)
-
-    let usedCount = 0
-    if (examIds.length > 0) {
-      const { count } = await supabase
-        .from('questions')
-        .select('id', { count: 'exact', head: true })
-        .in('exam_id', examIds)
-        .eq('lecture', lecture.name)
-        .is('deleted_at', null)
-      usedCount = count || 0
+    // Soft-deleted questions count as well: they can be restored and keep their tags
+    const use = await countQuestionUse(`lecture_id.eq.${lecture.id}`)
+    if (!use) {
+      showToast('Could not check whether this lecture is in use. Nothing was deleted.', 'error')
+      return
     }
-    if (usedCount > 0) {
-      showToast(`Cannot delete: ${usedCount} question(s) are tagged with this lecture.`, 'error')
+    if (use.active + use.deleted > 0) {
+      showToast(`Cannot delete: ${questionUseText(use)} use this lecture.`, 'error')
       return
     }
 
