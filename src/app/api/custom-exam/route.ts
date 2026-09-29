@@ -7,7 +7,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
 
     const subjectId = searchParams.get('subjectId')
-    const count = Math.min(parseInt(searchParams.get('count') || '20'), 200)
+    const count = Math.max(1, Math.min(parseInt(searchParams.get('count') || '20') || 20, 200))
     const randomize = searchParams.get('randomize') === 'true'
     const batchIds = searchParams.get('batches')?.split(',').filter(Boolean) || []
     const doctorIds = searchParams.get('doctors')?.split(',').filter(Boolean) || []
@@ -65,37 +65,32 @@ export async function GET(request: NextRequest) {
 
     const examIds = exams.map(e => e.id)
 
-    // Get questions from those exams
-    let questionQuery = supabase
-      .from('questions')
-      .select('id')
-      .in('exam_id', examIds)
-      .is('deleted_at', null)
+    // Pick the questions inside the database: filter, shuffle and limit there.
+    // (The API returns 1000 rows at most, so fetching every question id and
+    // shuffling here would never pick questions beyond the first 1000.)
+    const { data: pickedIds, error: pickError } = await supabase.rpc('pick_custom_exam_questions', {
+      p_exam_ids: examIds,
+      p_chapter_ids: chapterIds,
+      p_lecture_ids: lectureIds,
+      p_count: count,
+      p_randomize: randomize,
+    })
 
-    if (chapterIds.length > 0) {
-      questionQuery = questionQuery.in('chapter_id', chapterIds)
+    if (pickError) {
+      console.error('Failed to pick custom exam questions:', pickError)
+      return NextResponse.json(
+        { error: 'Failed to create exam. Please try again.' },
+        { status: 500 }
+      )
     }
 
-    if (lectureIds.length > 0) {
-      questionQuery = questionQuery.in('lecture_id', lectureIds)
-    }
+    const selectedIds = (pickedIds ?? []) as string[]
 
-    const { data: allQuestions } = await questionQuery
-
-    if (!allQuestions || allQuestions.length === 0) {
+    if (selectedIds.length === 0) {
       return NextResponse.json(
         { error: 'No questions found with the selected filters.' },
         { status: 404 }
       )
-    }
-
-    // Pick questions (randomize or take first N)
-    let selectedIds: string[]
-    if (randomize) {
-      const shuffled = [...allQuestions].sort(() => Math.random() - 0.5)
-      selectedIds = shuffled.slice(0, count).map(q => q.id)
-    } else {
-      selectedIds = allQuestions.slice(0, count).map(q => q.id)
     }
 
     const { data: customExam, error } = await supabase
