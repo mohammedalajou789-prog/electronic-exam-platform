@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 
 import { createClient } from '@/lib/supabase/client'
+import { compareBatches } from '@/lib/batch-order'
 import {
   Plus, Trash2, ChevronRight,
   BookOpen, Users, Stethoscope,
@@ -26,10 +27,28 @@ interface Subject {
   year_id: string | null
   subject_doctors: SubjectDoctor[]
   chapters: (Chapter & { lectures: Lecture[] })[]
-  batches: { id: string; name: string }[]
+  /** Batches this subject is shown to (from subject_batches), newest graduation year first */
+  batches: LinkedBatch[]
 }
 
-interface Batch { id: string; name: string; subject_id: string }
+/** A batch as linked to a subject */
+interface LinkedBatch { id: string; name: string; slug: string; graduation_year: number | null }
+
+/** One row of the batches table */
+interface BatchRow extends LinkedBatch { created_at: string }
+
+/** Subject row as returned by the query, before its batch links are flattened */
+type RawSubject = Omit<Subject, 'batches'> & {
+  subject_batches: { batch: LinkedBatch | LinkedBatch[] | null }[] | null
+}
+
+/**
+ * Same rule the database uses to generate batches.slug from the name,
+ * so the form can warn about an empty or duplicate link before saving.
+ */
+function slugOf(name: string): string {
+  return name.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase()
+}
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
@@ -151,18 +170,22 @@ export default function ContentManagementPage() {
   const [newSubjectSemester, setNewSubjectSemester] = useState('')
   const [newSubjectYear, setNewSubjectYear] = useState('')
 
-  // Batch modal
+  // Batches tab
   const [showBatchModal, setShowBatchModal] = useState(false)
+  /** One row per batch (the shared list), newest graduation year first */
+  const [allBatches, setAllBatches] = useState<BatchRow[]>([])
+  /** Exams per batch slug, and per "subjectId:slug" pair (soft-deleted exams included) */
+  const [batchExamCounts, setBatchExamCounts] = useState<Record<string, number>>({})
+  const [pairExamCounts, setPairExamCounts] = useState<Record<string, number>>({})
+  const [newBatchName, setNewBatchName] = useState('')
+  const [newBatchYear, setNewBatchYear] = useState('')
+  const [yearDrafts, setYearDrafts] = useState<Record<string, string>>({})
+  const [linkSubjectId, setLinkSubjectId] = useState('')
 
   // Exam modal + exams list
   const [showExamModal, setShowExamModal] = useState(false)
   const [exams, setExams] = useState<any[]>([])
   const [examFilterYear, setExamFilterYear] = useState('All Years')
-  const [batchSearchQuery, setBatchSearchQuery] = useState('')
-  const [newBatchSubject, setNewBatchSubject] = useState('')
-  const [newBatchName, setNewBatchName] = useState('')
-  const [newBatchCustomName, setNewBatchCustomName] = useState('')
-  const [allBatchNames, setAllBatchNames] = useState<string[]>([])
 
   // New exam form state
   const [newExamYear, setNewExamYear] = useState('')
@@ -202,9 +225,9 @@ export default function ContentManagementPage() {
         id, name, description, semester_id, year_id,
         subject_doctors(id, doctor_id, doctor:doctors(name, department)),
         chapters(id, name, display_order, lectures(id, name, display_order)),
-        batches(id, name)
+        subject_batches(batch:batches(id, name, slug, graduation_year))
       `).order('name'),
-      supabase.from('batches').select('*').order('name'),
+      supabase.from('batches').select('id, name, slug, graduation_year, created_at').order('created_at'),
       supabase.from('exams').select('*').order('created_at', { ascending: false }),
       supabase.from('questions').select('id, exam_id').is('deleted_at', null),
       supabase.from('doctors').select('id, name, department').order('name'),
@@ -212,12 +235,43 @@ export default function ContentManagementPage() {
     setAcademicYears(yearsRes.data || [])
     setSemesters(semsRes.data || [])
     setAllDoctors((doctorsRes.data || []) as Doctor[])
-    const subsData = (subsRes.data || []) as Subject[]
+    // Flatten each subject's batch links into a sorted list
+    const subsData: Subject[] = ((subsRes.data || []) as unknown as RawSubject[]).map(({ subject_batches, ...rest }) => ({
+      ...rest,
+      batches: (subject_batches ?? [])
+        .map(link => (Array.isArray(link.batch) ? link.batch[0] : link.batch) ?? null)
+        .filter((b): b is LinkedBatch => b !== null)
+        .sort(compareBatches),
+    }))
     setSubjects(subsData)
-    const batchesData = (batchesRes.data || []) as Batch[]
-    const uniqueNames = [...new Set(batchesData.map((b: Batch) => b.name))]
-    setAllBatchNames(uniqueNames)
+
+    // The shared batch list: one row per slug. If a name still has several rows
+    // (before the restructure is finished), keep the row subjects are linked to.
+    const batchesData = (batchesRes.data || []) as BatchRow[]
+    const linkedIds = new Set(subsData.flatMap(sub => sub.batches.map(b => b.id)))
+    const bySlug = new Map<string, BatchRow>()
+    for (const b of batchesData) {
+      const kept = bySlug.get(b.slug)
+      if (!kept || (!linkedIds.has(kept.id) && linkedIds.has(b.id))) bySlug.set(b.slug, b)
+    }
+    setAllBatches(Array.from(bySlug.values()).sort(compareBatches))
+    setYearDrafts({})
+
     const rawExams = examsRes.data || []
+
+    // Exams per batch slug and per subject + batch slug (used to protect links that have exams)
+    const slugById = new Map(batchesData.map(b => [b.id, b.slug]))
+    const perBatch: Record<string, number> = {}
+    const perPair: Record<string, number> = {}
+    for (const exam of rawExams as { subject_id: string | null; batch_id: string | null }[]) {
+      const slug = exam.batch_id ? slugById.get(exam.batch_id) : undefined
+      if (!slug) continue
+      perBatch[slug] = (perBatch[slug] || 0) + 1
+      const key = `${exam.subject_id}:${slug}`
+      perPair[key] = (perPair[key] || 0) + 1
+    }
+    setBatchExamCounts(perBatch)
+    setPairExamCounts(perPair)
     const allQuestions = questionsCountRes.data || []
 
     // بناء map: exam_id → عدد الأسئلة الحقيقي
@@ -227,9 +281,9 @@ export default function ContentManagementPage() {
     }
 
     const enrichedExams = rawExams.map((exam: any) => {
-      // العلاقة الصحيحة: exam → batch → subject
-      const batch = batchesData.find((b: Batch) => b.id === exam.batch_id) || null
-      const subject = batch ? subsData.find((s: Subject) => s.id === batch.subject_id) || null : null
+      // The exam's subject comes from exams.subject_id; its batch only gives the batch name
+      const batch = batchesData.find((b: BatchRow) => b.id === exam.batch_id) || null
+      const subject = subsData.find((s: Subject) => s.id === exam.subject_id) || null
       return {
         ...exam,
         batch,
@@ -283,25 +337,14 @@ export default function ContentManagementPage() {
   }
 
   async function deleteSubject(id: string) {
-    const { data: subjectBatches } = await supabase
-      .from('batches')
-      .select('id')
-      .eq('subject_id', id)
-    const batchIds = (subjectBatches || []).map(b => b.id)
+    const [{ count: linkCount }, { count: examCount }] = await Promise.all([
+      supabase.from('subject_batches').select('id', { count: 'exact', head: true }).eq('subject_id', id),
+      supabase.from('exams').select('id', { count: 'exact', head: true }).eq('subject_id', id).is('deleted_at', null),
+    ])
 
-    let examCount = 0
-    if (batchIds.length > 0) {
-      const { count } = await supabase
-        .from('exams')
-        .select('id', { count: 'exact', head: true })
-        .in('batch_id', batchIds)
-        .is('deleted_at', null)
-      examCount = count ?? 0
-    }
-
-    if (batchIds.length > 0) {
+    if ((linkCount ?? 0) > 0) {
       showToast(
-        `Cannot delete: this subject has ${batchIds.length} batch(es)${examCount > 0 ? ` and ${examCount} exam(s)` : ''}. Delete them first.`,
+        `Cannot delete: this subject is shown to ${linkCount} batch(es)${(examCount ?? 0) > 0 ? ` and has ${examCount} exam(s)` : ''}. Remove them first.`,
         'error'
       )
       return
@@ -349,8 +392,7 @@ export default function ContentManagementPage() {
     const link = subject?.subject_doctors.find(sd => sd.id === subjectDoctorId)
     if (!subject || !link) return
 
-    const batchIds = subject.batches.map(b => b.id)
-    const examIds = exams.filter(e => batchIds.includes(e.batch_id)).map(e => e.id)
+    const examIds = exams.filter(e => e.subject_id === subject.id).map(e => e.id)
 
     let usedCount = 0
     if (examIds.length > 0) {
@@ -388,8 +430,7 @@ export default function ContentManagementPage() {
     const chapter = subject?.chapters.find(c => c.id === chapterId)
     if (!subject || !chapter) return
 
-    const batchIds = subject.batches.map(b => b.id)
-    const examIds = exams.filter(e => batchIds.includes(e.batch_id)).map(e => e.id)
+    const examIds = exams.filter(e => e.subject_id === subject.id).map(e => e.id)
 
     let usedCount = 0
     if (examIds.length > 0) {
@@ -433,8 +474,7 @@ export default function ContentManagementPage() {
     const lecture = chapter?.lectures.find(l => l.id === lectureId)
     if (!subject || !lecture) return
 
-    const batchIds = subject.batches.map(b => b.id)
-    const examIds = exams.filter(e => batchIds.includes(e.batch_id)).map(e => e.id)
+    const examIds = exams.filter(e => e.subject_id === subject.id).map(e => e.id)
 
     let usedCount = 0
     if (examIds.length > 0) {
@@ -459,21 +499,93 @@ export default function ContentManagementPage() {
 
   // ── Batch Actions ─────────────────────────────────────────────────────────
 
+  /** Empty string = no graduation year. Returns an error message, or null when the value is valid. */
+  function graduationYearProblem(value: string, exceptSlug: string | null): string | null {
+    if (value.trim() === '') return null
+    const year = Number(value)
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) return 'Graduation year must be between 2000 and 2100.'
+    const owner = allBatches.find(b => b.graduation_year === year && b.slug !== exceptSlug)
+    if (owner) return `${year} is already the graduation year of ${owner.name}.`
+    return null
+  }
+
+  function newBatchProblem(): string | null {
+    const name = newBatchName.trim()
+    if (!name) return null
+    const slug = slugOf(name)
+    if (!slug) return 'Use English letters or digits in the name.'
+    const same = allBatches.find(b => b.slug === slug)
+    if (same) return `A batch with this name already exists (${same.name}).`
+    return graduationYearProblem(newBatchYear, null)
+  }
+
   async function addBatch() {
-    const finalName = newBatchName === '__new' ? newBatchCustomName.trim() : newBatchName.trim()
-    if (!finalName || !newBatchSubject) return
+    const name = newBatchName.trim()
+    if (!name || newBatchProblem()) return
     setIsLoading(true)
-    await supabase.from('batches').insert({ name: finalName, subject_id: newBatchSubject })
-    setNewBatchName(''); setNewBatchCustomName(''); setNewBatchSubject('')
+    // The slug (used in page links) is generated by the database from the name
+    const { error } = await supabase.from('batches').insert({
+      name,
+      graduation_year: newBatchYear.trim() === '' ? null : Number(newBatchYear),
+    })
+    if (error) { showToast(error.message, 'error'); setIsLoading(false); return }
+    setNewBatchName(''); setNewBatchYear('')
     setShowBatchModal(false)
     await loadAll(); showToast('Batch added'); setIsLoading(false)
   }
 
-  async function deleteBatch(id: string) {
-    if (!confirm('Delete this batch?')) return
-    const { error } = await supabase.from('batches').delete().eq('id', id)
+  async function saveBatchYear(batch: BatchRow) {
+    const value = yearDrafts[batch.slug] ?? ''
+    const problem = graduationYearProblem(value, batch.slug)
+    if (problem) { showToast(problem, 'error'); return }
+    setIsLoading(true)
+    // By slug: while the restructure is in progress a name can still have several rows
+    const { error } = await supabase
+      .from('batches')
+      .update({ graduation_year: value.trim() === '' ? null : Number(value) })
+      .eq('slug', batch.slug)
+    if (error) { showToast(error.message, 'error'); setIsLoading(false); return }
+    await loadAll(); showToast('Graduation year saved'); setIsLoading(false)
+  }
+
+  async function deleteBatch(batch: BatchRow) {
+    const usedBy = subjects.filter(s => s.batches.some(b => b.slug === batch.slug)).length
+    if (usedBy > 0 || (batchExamCounts[batch.slug] ?? 0) > 0) {
+      showToast('Cannot delete: remove this batch from all subjects first. Batches that have exams cannot be deleted.', 'error')
+      return
+    }
+    if (!confirm(`Delete the batch "${batch.name}"?`)) return
+    const { error } = await supabase.from('batches').delete().eq('slug', batch.slug)
     if (error) { showToast(error.message, 'error'); return }
     await loadAll(); showToast('Batch deleted')
+  }
+
+  /** Show / hide a subject for a batch (a row in subject_batches) */
+  async function toggleSubjectBatch(subjectId: string, batch: BatchRow) {
+    const subject = subjects.find(s => s.id === subjectId)
+    if (!subject) return
+    const link = subject.batches.find(b => b.slug === batch.slug)
+    setIsLoading(true)
+    if (link) {
+      if ((pairExamCounts[`${subjectId}:${batch.slug}`] ?? 0) > 0) {
+        showToast('Cannot remove: this subject has exams in this batch.', 'error')
+        setIsLoading(false)
+        return
+      }
+      const { error } = await supabase
+        .from('subject_batches')
+        .delete()
+        .eq('subject_id', subjectId)
+        .eq('batch_id', link.id)
+      if (error) { showToast(error.message, 'error'); setIsLoading(false); return }
+      await loadAll(); showToast(`${subject.name} removed from ${batch.name}`); setIsLoading(false)
+    } else {
+      const { error } = await supabase
+        .from('subject_batches')
+        .insert({ subject_id: subjectId, batch_id: batch.id })
+      if (error) { showToast(error.message, 'error'); setIsLoading(false); return }
+      await loadAll(); showToast(`${subject.name} added to ${batch.name}`); setIsLoading(false)
+    }
   }
 
   async function createExam() {
@@ -493,6 +605,7 @@ export default function ContentManagementPage() {
     }
 
     const { data: examData, error } = await supabase.from('exams').insert({
+      subject_id: newExamSubjectId,
       batch_id: newExamBatchId,
       title: newExamTitle.trim(),
       calendar_year: parseInt(newExamCalendarYear) || new Date().getFullYear(),
@@ -585,14 +698,34 @@ export default function ContentManagementPage() {
     if (yearSubjects.length > 0) subjectsByYear.push({ yearName: year.name, subjects: yearSubjects })
   })
 
-  // Filtered subjects for batches tab
-  const subjectsWithBatches = subjects.filter(s => {
-    const hasBatches = (s.batches || []).length > 0
-    const matchSearch = !batchSearchQuery ||
-      s.name.toLowerCase().includes(batchSearchQuery.toLowerCase()) ||
-      s.batches.some(b => b.name.toLowerCase().includes(batchSearchQuery.toLowerCase()))
-    return hasBatches && matchSearch
-  })
+  // Subject options grouped by year / semester (Batches tab)
+  const renderSubjectOptions = () => (
+    <>
+      {preClinicalYears.map(year => {
+        const yearSems = semesters.filter(s => s.academic_year_id === year.id)
+        return yearSems.map(sem => {
+          const semSubjects = subjects.filter(s => s.semester_id === sem.id)
+          if (!semSubjects.length) return null
+          return (
+            <optgroup key={sem.id} label={`${year.name} — ${sem.name}`}>
+              {semSubjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </optgroup>
+          )
+        })
+      })}
+      {clinicalYears.map(year => {
+        const yearSubjects = subjects.filter(s => s.year_id === year.id)
+        if (!yearSubjects.length) return null
+        return (
+          <optgroup key={year.id} label={year.name}>
+            {yearSubjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </optgroup>
+        )
+      })}
+    </>
+  )
+
+  const linkSubject = subjects.find(s => s.id === linkSubjectId) ?? null
 
   // ── Subject Row Component ─────────────────────────────────────────────────
 
@@ -1162,13 +1295,9 @@ export default function ContentManagementPage() {
 
             {activeTab === 'batches' && (
               <>
-                <input
-                  className="adm-input"
-                  placeholder="Search by subject or batch name..."
-                  value={batchSearchQuery}
-                  onChange={e => setBatchSearchQuery(e.target.value)}
-                  style={{ flex: '1 1 0%', minWidth: 200 }}
-                />
+                <span style={{ flex: '1 1 0%', minWidth: 200, fontSize: 13, color: 'var(--fg-muted)' }}>
+                  Batches are listed everywhere by graduation year, newest first.
+                </span>
                 <button
                   onClick={() => setShowBatchModal(true)}
                   className="adm-btn-primary"
@@ -1250,43 +1379,138 @@ export default function ContentManagementPage() {
 
           {/* ══ BATCHES TAB ═════════════════════════════════════════════════ */}
           {activeTab === 'batches' && (
-            <div className="adm-fade" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {subjectsWithBatches.length === 0 ? (
-                <div style={{ border: '1px dashed var(--bd)', borderRadius: 18, padding: '60px 0', textAlign: 'center' }}>
-                  <Users width={36} height={36} style={{ margin: '0 auto 12px', color: 'var(--fg-muted)', opacity: 0.4, display: 'block' }} />
-                  <p style={{ fontSize: 13.5, color: 'var(--fg-muted)', margin: 0 }}>
-                    No batches yet. Add your first batch.
-                  </p>
+            <div className="adm-fade" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+
+              {/* ── All batches (the shared list) ── */}
+              <div className="adm-card" style={{ padding: '18px 20px' }}>
+                <div style={{ fontSize: 14.5, fontWeight: 800, marginBottom: 2 }}>All Batches</div>
+                <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginBottom: 12 }}>
+                  One list shared by every subject. Batches without a graduation year (such as Previous Batches) are listed last and cannot be chosen as a student&apos;s batch.
                 </div>
-              ) : (
-                subjectsWithBatches.map(subject => (
-                  <div key={subject.id} className="adm-card" style={{ padding: '18px 20px' }}>
-                    <div style={{ fontSize: 14.5, fontWeight: 800, marginBottom: 2 }}>{subject.name}</div>
-                    <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginBottom: 12 }}>{getSubjectLocation(subject)}</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-                      {subject.batches.map((batch, idx) => (
-                        <div key={batch.id} style={{
-                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                          padding: '10px 4px',
-                          borderTop: '1px solid var(--bd)',
+                {allBatches.length === 0 ? (
+                  <div style={{ border: '1px dashed var(--bd)', borderRadius: 14, padding: '36px 0', textAlign: 'center' }}>
+                    <Users width={32} height={32} style={{ margin: '0 auto 10px', color: 'var(--fg-muted)', opacity: 0.4, display: 'block' }} />
+                    <p style={{ fontSize: 13.5, color: 'var(--fg-muted)', margin: 0 }}>No batches yet. Add your first batch.</p>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    {allBatches.map((batch, idx) => {
+                      const usedBy = subjects.filter(s => s.batches.some(b => b.slug === batch.slug)).length
+                      const examCount = batchExamCounts[batch.slug] ?? 0
+                      const savedYear = batch.graduation_year === null ? '' : String(batch.graduation_year)
+                      const draft = yearDrafts[batch.slug] ?? savedYear
+                      const canDelete = usedBy === 0 && examCount === 0
+                      return (
+                        <div key={batch.slug} className="adm-row-fade" style={{
+                          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+                          padding: '10px 4px', borderTop: '1px solid var(--bd)',
+                          animationDelay: `${Math.min(idx, 10) * 30}ms`,
                         }}>
-                          <span style={{ fontSize: 13.5, fontWeight: 600 }}>{batch.name}</span>
-                          <button
-                            onClick={() => deleteBatch(batch.id)}
+                          <div style={{ flex: '1 1 180px', minWidth: 0 }}>
+                            <div style={{ fontSize: 13.5, fontWeight: 700 }}>{batch.name}</div>
+                            <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
+                              {usedBy} subject{usedBy === 1 ? '' : 's'} · {examCount} exam{examCount === 1 ? '' : 's'}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <input
+                              className="adm-input"
+                              type="number"
+                              inputMode="numeric"
+                              placeholder="No year"
+                              aria-label={`Graduation year of ${batch.name}`}
+                              value={draft}
+                              onChange={e => setYearDrafts(p => ({ ...p, [batch.slug]: e.target.value }))}
+                              style={{ width: 120 }}
+                            />
+                            <button
+                              className="adm-btn-ghost"
+                              style={{ padding: '8px 13px', fontSize: 12.5 }}
+                              disabled={isLoading || draft.trim() === savedYear}
+                              onClick={() => saveBatchYear(batch)}
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={() => deleteBatch(batch)}
+                              disabled={!canDelete}
+                              title={canDelete ? 'Delete batch' : 'Only batches with no subjects and no exams can be deleted'}
+                              aria-label={`Delete ${batch.name}`}
+                              style={{
+                                width: 30, height: 30, borderRadius: 8, border: 'none',
+                                background: 'transparent', color: 'var(--accent-orange)',
+                                cursor: canDelete ? 'pointer' : 'not-allowed', opacity: canDelete ? 1 : 0.35,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              }}
+                            >
+                              <Trash2 width={14} height={14} />
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* ── Which batches a subject is shown to ── */}
+              <div className="adm-card" style={{ padding: '18px 20px' }}>
+                <div style={{ fontSize: 14.5, fontWeight: 800, marginBottom: 2 }}>Subject Batches</div>
+                <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginBottom: 12 }}>
+                  Choose a subject, then tick the batches it is shown to. A batch that already has exams in this subject stays ticked.
+                </div>
+                <select
+                  className="adm-input"
+                  value={linkSubjectId}
+                  onChange={e => setLinkSubjectId(e.target.value)}
+                  style={{ maxWidth: 420, marginBottom: linkSubject ? 14 : 0 }}
+                >
+                  <option value="">Select Subject</option>
+                  {renderSubjectOptions()}
+                </select>
+
+                {linkSubject && (
+                  allBatches.length === 0 ? (
+                    <p style={{ fontSize: 13, color: 'var(--fg-muted)', margin: 0 }}>Add a batch first.</p>
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 10 }}>
+                      {allBatches.map((batch, idx) => {
+                        const linked = linkSubject.batches.some(b => b.slug === batch.slug)
+                        const pairExams = pairExamCounts[`${linkSubject.id}:${batch.slug}`] ?? 0
+                        const locked = linked && pairExams > 0
+                        return (
+                          <label
+                            key={batch.slug}
+                            className="adm-row-fade"
                             style={{
-                              width: 28, height: 28, borderRadius: 8, border: 'none',
-                              background: 'transparent', color: 'var(--accent-orange)',
-                              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              display: 'flex', alignItems: 'center', gap: 10,
+                              padding: '10px 12px', borderRadius: 12,
+                              border: `1px solid ${linked ? 'var(--clr-primary)' : 'var(--bd)'}`,
+                              background: linked ? 'var(--clr-soft)' : 'var(--bg-soft)',
+                              cursor: locked || isLoading ? 'not-allowed' : 'pointer',
+                              animationDelay: `${Math.min(idx, 10) * 30}ms`,
                             }}
                           >
-                            <Trash2 width={14} height={14} />
-                          </button>
-                        </div>
-                      ))}
+                            <input
+                              type="checkbox"
+                              checked={linked}
+                              disabled={locked || isLoading}
+                              onChange={() => toggleSubjectBatch(linkSubject.id, batch)}
+                              style={{ width: 16, height: 16, accentColor: 'var(--clr-primary)', flexShrink: 0 }}
+                            />
+                            <span style={{ minWidth: 0 }}>
+                              <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700 }}>{batch.name}</span>
+                              <span style={{ display: 'block', fontSize: 11.5, color: 'var(--fg-muted)' }}>
+                                {batch.graduation_year ?? 'No year'}{pairExams > 0 ? ` · ${pairExams} exam${pairExams === 1 ? '' : 's'}` : ''}
+                              </span>
+                            </span>
+                          </label>
+                        )
+                      })}
                     </div>
-                  </div>
-                ))
-              )}
+                  )
+                )}
+              </div>
             </div>
           )}
 
@@ -1803,63 +2027,40 @@ export default function ContentManagementPage() {
               </button>
             </div>
 
-            <select
-              className="adm-input"
-              style={{ marginBottom: 12 }}
-              value={newBatchSubject}
-              onChange={e => setNewBatchSubject(e.target.value)}
-            >
-              <option value="">Select Subject</option>
-              {preClinicalYears.map(year => {
-                const yearSems = semesters.filter(s => s.academic_year_id === year.id)
-                return yearSems.map(sem => {
-                  const semSubjects = subjects.filter(s => s.semester_id === sem.id)
-                  if (!semSubjects.length) return null
-                  return (
-                    <optgroup key={sem.id} label={`${year.name} — ${sem.name}`}>
-                      {semSubjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </optgroup>
-                  )
-                })
-              })}
-              {clinicalYears.map(year => {
-                const yearSubjects = subjects.filter(s => s.year_id === year.id)
-                if (!yearSubjects.length) return null
-                return (
-                  <optgroup key={year.id} label={year.name}>
-                    {yearSubjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </optgroup>
-                )
-              })}
-            </select>
-
-            <select
-              className="adm-input"
-              style={{ marginBottom: 12 }}
-              value={newBatchName}
-              onChange={e => setNewBatchName(e.target.value)}
-            >
-              <option value="">Select Batch Name</option>
-              {allBatchNames.map(b => <option key={b} value={b}>{b}</option>)}
-              <option value="__new">+ New name</option>
-            </select>
-
-            {newBatchName === '__new' && (
+            <label style={{ display: 'block', marginBottom: 12 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>Batch name *</div>
               <input
                 className="adm-input"
-                placeholder="Enter new batch name..."
-                style={{ marginBottom: 12 }}
-                value={newBatchCustomName}
-                onChange={e => setNewBatchCustomName(e.target.value)}
+                placeholder="e.g. Passion"
+                value={newBatchName}
+                onChange={e => setNewBatchName(e.target.value)}
                 autoFocus
               />
+            </label>
+
+            <label style={{ display: 'block', marginBottom: 12 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 6 }}>Graduation year</div>
+              <input
+                className="adm-input"
+                type="number"
+                inputMode="numeric"
+                placeholder="e.g. 2029 (leave empty for groups like Previous Batches)"
+                value={newBatchYear}
+                onChange={e => setNewBatchYear(e.target.value)}
+              />
+            </label>
+
+            {newBatchName.trim() && (
+              <div style={{ fontSize: 12.5, marginBottom: 12, color: newBatchProblem() ? 'var(--accent-orange)' : 'var(--fg-muted)' }}>
+                {newBatchProblem() ?? `Page link: …/${slugOf(newBatchName)}`}
+              </div>
             )}
 
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
-              <button onClick={() => { setShowBatchModal(false); setNewBatchSubject(''); setNewBatchName(''); setNewBatchCustomName('') }} className="adm-btn-ghost">Cancel</button>
+              <button onClick={() => { setShowBatchModal(false); setNewBatchName(''); setNewBatchYear('') }} className="adm-btn-ghost">Cancel</button>
               <button
                 onClick={addBatch}
-                disabled={isLoading || !newBatchSubject || (newBatchName === '__new' ? !newBatchCustomName.trim() : !newBatchName.trim())}
+                disabled={isLoading || !newBatchName.trim() || newBatchProblem() !== null}
                 className="adm-btn-primary"
               >
                 {isLoading ? <Loader2 width={15} height={15} className="animate-spin" /> : null}
