@@ -33,8 +33,9 @@ interface Props {
   academicYears: FilterOption[]
   semesters:     (FilterOption & { academic_year_id: string })[]
   subjects:      (FilterOption & { semester_id?: string; academic_year_id?: string })[]
-  batches:       (FilterOption & { subject_id: string })[]
-  exams:         (FilterOption & { batch_id: string })[]
+  /** One entry per subject + batch link; the same batch appears once per subject */
+  batches:       (FilterOption & { subject_id: string; slug: string })[]
+  exams:         (FilterOption & { subject_id: string | null; batch_slug: string | null })[]
 }
 
 export default function SearchClient({
@@ -177,11 +178,16 @@ export default function SearchClient({
     : filters.year_id
     ? subjects.filter(s => s.academic_year_id === filters.year_id)
     : subjects
+  // Without a subject, list each batch once (a batch can be linked to many subjects)
   const visibleBatches = filters.subject_id
     ? batches.filter(b => b.subject_id === filters.subject_id)
-    : batches
+    : batches.filter((b, i) => batches.findIndex(x => x.slug === b.slug) === i)
+  // Exams are matched to the chosen batch by slug (every batch name has one slug)
+  const selectedBatchSlug = batches.find(b => b.id === filters.batch_id)?.slug
   const visibleExams = filters.batch_id
-    ? exams.filter(e => e.batch_id === filters.batch_id)
+    ? exams.filter(e =>
+        e.batch_slug === selectedBatchSlug &&
+        (!filters.subject_id || e.subject_id === filters.subject_id))
     : exams
 
   const selectStyle = (hasValue: boolean): React.CSSProperties => ({

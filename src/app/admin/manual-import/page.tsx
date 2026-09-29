@@ -2,12 +2,21 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { compareBatches } from '@/lib/batch-order'
 import { Plus, Trash2, ImagePlus, X, Save, CheckCircle } from 'lucide-react'
 import Link from 'next/link'
 import { MnEditor } from '@/components/shared/MnEditor'
 
-interface Exam { id: string; title: string; batch_id: string }
-interface Batch { id: string; name: string; subject_id: string }
+interface Exam {
+  id: string
+  title: string
+  batch_id: string
+  subject_id: string | null
+  /** The exam's batch; matched to a subject's batches by slug (every batch name has one slug) */
+  batches: { name: string; slug: string } | null
+}
+/** A batch as linked to a subject (one row per subject + batch pair) */
+interface Batch { id: string; name: string; slug: string; graduation_year: number | null; subject_id: string }
 interface Subject { id: string; name: string; semester_id: string | null; year_id: string | null }
 interface Doctor { id: string; name: string }
 interface Chapter { id: string; name: string; subject_id: string }
@@ -89,8 +98,8 @@ export default function ManualImportPage() {
     async function load() {
       const [{ data: ex }, { data: ba }, { data: su }, { data: do_ }, { data: ch }, { data: le }, { data: yr }, { data: sm }] =
         await Promise.all([
-          supabase.from('exams').select('id, title, batch_id').neq('status', 'archived').is('deleted_at', null).order('title'),
-          supabase.from('batches').select('*'),
+          supabase.from('exams').select('id, title, batch_id, subject_id, batches(name, slug)').neq('status', 'archived').is('deleted_at', null).order('title'),
+          supabase.from('subject_batches').select('subject_id, batch:batches(id, name, slug, graduation_year)'),
           supabase.from('subjects').select('id, name, semester_id, year_id'),
           supabase.from('doctors').select('*').order('name'),
           supabase.from('chapters').select('*').order('display_order'),
@@ -98,8 +107,13 @@ export default function ManualImportPage() {
           supabase.from('academic_years').select('id, name, is_clinical').order('display_order'),
           supabase.from('semesters').select('id, name, academic_year_id').order('display_order'),
         ])
-      setExams(ex || [])
-      setBatches(ba || [])
+      setExams((ex || []) as unknown as Exam[])
+      // One row per subject + batch link, newest graduation year first
+      setBatches(
+        ((ba || []) as unknown as { subject_id: string; batch: Omit<Batch, 'subject_id'> | null }[])
+          .flatMap(link => (link.batch ? [{ ...link.batch, subject_id: link.subject_id }] : []))
+          .sort(compareBatches)
+      )
       setSubjects(su || [])
       setDoctors(do_ || [])
       setAllChapters(ch || [])
@@ -114,8 +128,7 @@ export default function ManualImportPage() {
     setSelectedExam(examId)
     if (!examId) { setCurrentSubjectId(''); setExamDoctorIds([]); return }
     const exam = exams.find(e => e.id === examId)
-    const batch = batches.find(b => b.id === exam?.batch_id)
-    const subjectId = batch?.subject_id || ''
+    const subjectId = exam?.subject_id || ''
     setCurrentSubjectId(subjectId)
     setQuestions(prev => prev.map(q => ({ ...q, chapter_id: '', lecture_id: '', doctor_id: '' })))
     if (subjectName) setExpandedSubject(subjectName)
@@ -356,10 +369,10 @@ export default function ManualImportPage() {
   function getFilteredExams() {
     let filtered = exams
     if (filterBatch) {
-      filtered = filtered.filter(e => e.batch_id === filterBatch)
+      const slug = batches.find(b => b.id === filterBatch)?.slug
+      filtered = filtered.filter(e => e.subject_id === filterSubject && e.batches?.slug === slug)
     } else if (filterSubject) {
-      const sb = batches.filter(b => b.subject_id === filterSubject).map(b => b.id)
-      filtered = filtered.filter(e => sb.includes(e.batch_id))
+      filtered = filtered.filter(e => e.subject_id === filterSubject)
     } else if (filterYear) {
       const yearObj = academicYears.find(y => y.id === filterYear)
       let sids: string[]
@@ -371,11 +384,10 @@ export default function ManualImportPage() {
         if (filterSemester) ss = ss.filter(s => s.semester_id === filterSemester)
         sids = ss.map(s => s.id)
       }
-      const yb = batches.filter(b => sids.includes(b.subject_id)).map(b => b.id)
-      filtered = filtered.filter(e => yb.includes(e.batch_id))
+      filtered = filtered.filter(e => e.subject_id !== null && sids.includes(e.subject_id))
     }
     const q = examSearch.trim().toLowerCase()
-    if (q) filtered = filtered.filter(e => e.title.toLowerCase().includes(q) || (subjects.find(s => s.id === batches.find(b => b.id === e.batch_id)?.subject_id)?.name || '').toLowerCase().includes(q))
+    if (q) filtered = filtered.filter(e => e.title.toLowerCase().includes(q) || (subjects.find(s => s.id === e.subject_id)?.name || '').toLowerCase().includes(q))
     return filtered
   }
 
@@ -383,8 +395,7 @@ export default function ManualImportPage() {
     const filtered = getFilteredExams()
     const grouped: Record<string, { subjectName: string; exams: Exam[] }> = {}
     filtered.forEach(exam => {
-      const batch = batches.find(b => b.id === exam.batch_id)
-      const subject = subjects.find(s => s.id === batch?.subject_id)
+      const subject = subjects.find(s => s.id === exam.subject_id)
       const subName = subject?.name || 'Unknown'
       if (!grouped[subName]) grouped[subName] = { subjectName: subName, exams: [] }
       grouped[subName].exams.push(exam)
@@ -397,8 +408,8 @@ export default function ManualImportPage() {
 
   // Current selected exam label
   const selectedExamObj = exams.find(e => e.id === selectedExam)
-  const selectedBatch = batches.find(b => b.id === selectedExamObj?.batch_id)
-  const selectedSubject = subjects.find(s => s.id === selectedBatch?.subject_id)
+  const selectedBatch = selectedExamObj?.batches ?? null
+  const selectedSubject = subjects.find(s => s.id === selectedExamObj?.subject_id)
 
   // ─── JSX ──────────────────────────────────────────────────────────────────
   return (
@@ -511,7 +522,7 @@ export default function ManualImportPage() {
                               <div>
                                 {group.exams.map((exam, idx) => {
                                   const isSelected = selectedExam === exam.id
-                                  const batch = batches.find(b => b.id === exam.batch_id)
+                                  const batch = exam.batches
                                   return (
                                     <div key={exam.id} onClick={() => handleExamSelect(exam.id, group.subjectName)} style={{ display:'flex', alignItems:'center', gap:12, padding:'11px 16px 11px 13px', cursor:'pointer', borderBottom: idx < group.exams.length - 1 ? '1px solid var(--mi-bd)' : 'none', background: isSelected ? 'var(--mi-psoft)' : 'transparent', borderLeft:`3px solid ${isSelected ? 'var(--mi-primary)' : 'transparent'}`, transition:'background 0.12s' }}
                                       onMouseEnter={e => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = 'var(--mi-soft)' }}

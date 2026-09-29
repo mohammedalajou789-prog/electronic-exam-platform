@@ -59,12 +59,12 @@ export async function GET(req: NextRequest) {
       .ilike('name', pattern)
       .limit(3),
 
-    // 5. Batches
+    // 5. Batches (fetch more to deduplicate names)
     supabase
       .from('batches')
       .select('name')
       .ilike('name', pattern)
-      .limit(3),
+      .limit(20),
 
     // 6. Question text — lowest priority
     supabase
@@ -99,8 +99,9 @@ export async function GET(req: NextRequest) {
   for (const d of doctors ?? []) {
     suggestions.push({ type: 'doctor', label: d.name, icon: '👨‍⚕️' })
   }
-  for (const b of batches ?? []) {
-    suggestions.push({ type: 'batch', label: b.name, icon: '🎓' })
+  const uniqueBatches = [...new Set((batches ?? []).map(b => b.name))].slice(0, 3)
+  for (const name of uniqueBatches) {
+    suggestions.push({ type: 'batch', label: name, icon: '🎓' })
   }
   for (const q of questions ?? []) {
     suggestions.push({

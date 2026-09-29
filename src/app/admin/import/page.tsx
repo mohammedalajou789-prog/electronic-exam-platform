@@ -3,12 +3,21 @@
 import Link from 'next/link'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { compareBatches } from '@/lib/batch-order'
 import { parseBulkImport, type ParsedQuestion, type ParseError } from '@/features/bulk-import/parser'
 import { ChevronDown, ChevronUp, ImagePlus, X } from 'lucide-react'
 import { ExplanationRenderer } from '@/components/exam/ExplanationRenderer'
 
-interface Exam { id: string; title: string; batch_id: string }
-interface Batch { id: string; name: string; subject_id: string }
+interface Exam {
+  id: string
+  title: string
+  batch_id: string
+  subject_id: string | null
+  /** The exam's batch; matched to a subject's batches by slug (every batch name has one slug) */
+  batches: { name: string; slug: string } | null
+}
+/** A batch as linked to a subject (one row per subject + batch pair) */
+interface Batch { id: string; name: string; slug: string; graduation_year: number | null; subject_id: string }
 interface Subject { id: string; name: string; semester_id: string | null; year_id: string | null }
 interface Doctor { id: string; name: string }
 interface Chapter { id: string; name: string; subject_id: string }
@@ -81,8 +90,8 @@ const [pendingLectureNums, setPendingLectureNums] = useState<{ name: string; num
     async function load() {
       const [{ data: ex }, { data: ba }, { data: su }, { data: do_ }, { data: ch }, { data: le }, { data: yr }, { data: sm }] =
         await Promise.all([
-          supabase.from('exams').select('id, title, batch_id').neq('status', 'archived').is('deleted_at', null).order('title'),
-          supabase.from('batches').select('*'),
+          supabase.from('exams').select('id, title, batch_id, subject_id, batches(name, slug)').neq('status', 'archived').is('deleted_at', null).order('title'),
+          supabase.from('subject_batches').select('subject_id, batch:batches(id, name, slug, graduation_year)'),
           supabase.from('subjects').select('id, name, semester_id, year_id'),
           supabase.from('doctors').select('*').order('name'),
           supabase.from('chapters').select('*').order('name'),
@@ -90,8 +99,13 @@ const [pendingLectureNums, setPendingLectureNums] = useState<{ name: string; num
           supabase.from('academic_years').select('id, name, is_clinical').order('display_order'),
           supabase.from('semesters').select('id, name, academic_year_id').order('display_order'),
         ])
-      setExams(ex || [])
-      setBatches(ba || [])
+      setExams((ex || []) as unknown as Exam[])
+      // One row per subject + batch link, newest graduation year first
+      setBatches(
+        ((ba || []) as unknown as { subject_id: string; batch: Omit<Batch, 'subject_id'> | null }[])
+          .flatMap(link => (link.batch ? [{ ...link.batch, subject_id: link.subject_id }] : []))
+          .sort(compareBatches)
+      )
       setSubjects(su || [])
       setDoctors(do_ || [])
       setAllChapters(ch || [])
@@ -104,8 +118,7 @@ const [pendingLectureNums, setPendingLectureNums] = useState<{ name: string; num
 
   function getSubjectIdForExam(examId: string): string | null {
     const exam = exams.find(e => e.id === examId)
-    const batch = batches.find(b => b.id === exam?.batch_id)
-    return batch?.subject_id || null
+    return exam?.subject_id || null
   }
 
   async function handleExamSelect(examId: string, subjectName?: string) {
@@ -267,9 +280,8 @@ const [pendingLectureNums, setPendingLectureNums] = useState<{ name: string; num
   }
 
   function getExamLabel(exam: Exam) {
-    const batch = batches.find(b => b.id === exam.batch_id)
-    const subject = subjects.find(s => s.id === batch?.subject_id)
-    return `${exam.title} — ${subject?.name || ''} (${batch?.name || ''})`
+    const subject = subjects.find(s => s.id === exam.subject_id)
+    return `${exam.title} — ${subject?.name || ''} (${exam.batches?.name || ''})`
   }
 
   const formatTemplate = `1. Question text here?
@@ -676,9 +688,9 @@ QUESTIONS TO CONVERT:
                     const readyForExams = !!filterYear && (academicYears.find(y=>y.id===filterYear)?.is_clinical || !!filterSemester || semesters.filter(s=>s.academic_year_id===filterYear).length===0)
                     if (!readyForExams) return null
                     let allFiltered = exams
-                    if (filterBatch) { allFiltered = allFiltered.filter(e => e.batch_id === filterBatch) }
-                    else if (filterSubject) { const sb = batches.filter(b=>b.subject_id===filterSubject).map(b=>b.id); allFiltered=allFiltered.filter(e=>sb.includes(e.batch_id)) }
-                    else { const yearObj=academicYears.find(y=>y.id===filterYear); let sids:string[]; if(yearObj?.is_clinical){sids=subjects.filter(s=>s.year_id===filterYear).map(s=>s.id)}else{const ys=semesters.filter(s=>s.academic_year_id===filterYear).map(s=>s.id);let ss=subjects.filter(s=>s.semester_id&&ys.includes(s.semester_id));if(filterSemester)ss=ss.filter(s=>s.semester_id===filterSemester);sids=ss.map(s=>s.id)}; const yb=batches.filter(b=>sids.includes(b.subject_id)).map(b=>b.id); allFiltered=allFiltered.filter(e=>yb.includes(e.batch_id)) }
+                    if (filterBatch) { const slug = batches.find(b => b.id === filterBatch)?.slug; allFiltered = allFiltered.filter(e => e.subject_id === filterSubject && e.batches?.slug === slug) }
+                    else if (filterSubject) { allFiltered=allFiltered.filter(e=>e.subject_id===filterSubject) }
+                    else { const yearObj=academicYears.find(y=>y.id===filterYear); let sids:string[]; if(yearObj?.is_clinical){sids=subjects.filter(s=>s.year_id===filterYear).map(s=>s.id)}else{const ys=semesters.filter(s=>s.academic_year_id===filterYear).map(s=>s.id);let ss=subjects.filter(s=>s.semester_id&&ys.includes(s.semester_id));if(filterSemester)ss=ss.filter(s=>s.semester_id===filterSemester);sids=ss.map(s=>s.id)}; allFiltered=allFiltered.filter(e=>e.subject_id!==null&&sids.includes(e.subject_id)) }
                     return (
                       <div style={{ marginTop:6, padding:'12px 13px', borderRadius:10, background:'var(--bi-psoft)', fontSize:11.5, lineHeight:1.6, color:'var(--bi-primary)' }}>
                         <strong>{allFiltered.length}</strong> exam(s) match these filters.
@@ -704,18 +716,17 @@ QUESTIONS TO CONVERT:
 
                     // Build filtered exams
                     let filteredExams = exams
-                    if (filterBatch) { filteredExams = filteredExams.filter(e => e.batch_id === filterBatch) }
-                    else if (filterSubject) { const sb = batches.filter(b=>b.subject_id===filterSubject).map(b=>b.id); filteredExams=filteredExams.filter(e=>sb.includes(e.batch_id)) }
-                    else { const yearObj=academicYears.find(y=>y.id===filterYear); let sids:string[]; if(yearObj?.is_clinical){sids=subjects.filter(s=>s.year_id===filterYear).map(s=>s.id)}else{const ys=semesters.filter(s=>s.academic_year_id===filterYear).map(s=>s.id);let ss=subjects.filter(s=>s.semester_id&&ys.includes(s.semester_id));if(filterSemester)ss=ss.filter(s=>s.semester_id===filterSemester);sids=ss.map(s=>s.id)}; const yb=batches.filter(b=>sids.includes(b.subject_id)).map(b=>b.id); filteredExams=filteredExams.filter(e=>yb.includes(e.batch_id)) }
+                    if (filterBatch) { const slug = batches.find(b => b.id === filterBatch)?.slug; filteredExams = filteredExams.filter(e => e.subject_id === filterSubject && e.batches?.slug === slug) }
+                    else if (filterSubject) { filteredExams=filteredExams.filter(e=>e.subject_id===filterSubject) }
+                    else { const yearObj=academicYears.find(y=>y.id===filterYear); let sids:string[]; if(yearObj?.is_clinical){sids=subjects.filter(s=>s.year_id===filterYear).map(s=>s.id)}else{const ys=semesters.filter(s=>s.academic_year_id===filterYear).map(s=>s.id);let ss=subjects.filter(s=>s.semester_id&&ys.includes(s.semester_id));if(filterSemester)ss=ss.filter(s=>s.semester_id===filterSemester);sids=ss.map(s=>s.id)}; filteredExams=filteredExams.filter(e=>e.subject_id!==null&&sids.includes(e.subject_id)) }
 
                     const q = examSearch.trim().toLowerCase()
-                    if (q) filteredExams = filteredExams.filter(e => e.title.toLowerCase().includes(q) || (subjects.find(s=>s.id===batches.find(b=>b.id===e.batch_id)?.subject_id)?.name||'').toLowerCase().includes(q))
+                    if (q) filteredExams = filteredExams.filter(e => e.title.toLowerCase().includes(q) || (subjects.find(s=>s.id===e.subject_id)?.name||'').toLowerCase().includes(q))
 
                     // Group by subject
                     const grouped: Record<string, { subjectName: string; exams: typeof filteredExams }> = {}
                     filteredExams.forEach(exam => {
-                      const batch = batches.find(b => b.id === exam.batch_id)
-                      const subject = subjects.find(s => s.id === batch?.subject_id)
+                      const subject = subjects.find(s => s.id === exam.subject_id)
                       const subName = subject?.name || 'Unknown'
                       if (!grouped[subName]) grouped[subName] = { subjectName: subName, exams: [] }
                       grouped[subName].exams.push(exam)
@@ -769,7 +780,7 @@ QUESTIONS TO CONVERT:
                                     <div style={{ maxHeight:280, overflowY:'auto' }}>
                                       {group.exams.map((exam, idx) => {
                                         const isSelected = selectedExam === exam.id
-                                        const batch = batches.find(b => b.id === exam.batch_id)
+                                        const batch = exam.batches
                                         return (
                                           <div
                                             key={exam.id}
