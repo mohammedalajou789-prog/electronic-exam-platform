@@ -13,7 +13,7 @@ interface Exam {
   status: string
   academic_year: { name: string } | null
   batch: { name: string } | null
-  batch_detail: { subject: { name: string; semester_id: string | null; year_id: string | null } | null } | null
+  subject: { name: string; semester_id: string | null; year_id: string | null } | null
   exam_doctors: Array<{ doctor: { name: string } | null }> | null
 }
 
@@ -142,7 +142,7 @@ export default function ExamsPage() {
         id, serial_number, title, exam_type, calendar_year, question_count, status,
         academic_year:academic_years(name),
         batch:batches(name),
-        batch_detail:batches(subject:subjects(name, semester_id, year_id)),
+        subject:subjects(name, semester_id, year_id),
         exam_doctors(doctor:doctors(name))
       `).is('deleted_at', null).order('created_at', { ascending: false }),
       supabase.from('academic_years').select('id, name, is_clinical').order('display_order'),
@@ -186,7 +186,7 @@ export default function ExamsPage() {
     return exams.filter(exam => {
       const yearName    = (exam.academic_year as any)?.name ?? ''
       const batchName   = (exam.batch as any)?.name ?? ''
-      const subjectName = (exam.batch_detail as any)?.subject?.name ?? ''
+      const subjectName = exam.subject?.name ?? ''
       const title       = exam.title ?? ''
       const matchSearch = !search ||
         title.toLowerCase().includes(search.toLowerCase()) ||
@@ -209,7 +209,7 @@ export default function ExamsPage() {
   }), [exams, filteredExams])
 
   function getExamsForSemester(semesterId: string) {
-    return filteredExams.filter(e => (e.batch_detail as any)?.subject?.semester_id === semesterId)
+    return filteredExams.filter(e => e.subject?.semester_id === semesterId)
   }
 
   function getExamsForYear(yearId: string) {
@@ -220,7 +220,7 @@ export default function ExamsPage() {
   function groupBySubject(list: Exam[]): { subjectName: string; exams: Exam[] }[] {
     const map = new Map<string, Exam[]>()
     for (const exam of list) {
-      const name = (exam.batch_detail as any)?.subject?.name ?? 'Other'
+      const name = exam.subject?.name ?? 'Other'
       if (!map.has(name)) map.set(name, [])
       map.get(name)!.push(exam)
     }
@@ -254,7 +254,7 @@ export default function ExamsPage() {
 
   // ── Exam Row ────────────────────────────────────────────────────────────────
   function ExamRow({ exam }: { exam: Exam }) {
-    const subjectName = (exam.batch_detail as any)?.subject?.name ?? ''
+    const subjectName = exam.subject?.name ?? ''
     const batchName   = (exam.batch as any)?.name ?? ''
     const doctorName  = (Array.isArray((exam as any).exam_doctors) ? (exam as any).exam_doctors.map((ed: any) => Array.isArray(ed.doctor) ? ed.doctor[0]?.name : ed.doctor?.name).filter(Boolean).join(', ') : '') ?? ''
     const isPublished = exam.status === 'published'

@@ -32,7 +32,8 @@ interface Exam {
   calendar_year: number | null
   status: string
   question_count: number
-  batch: { name: string; subject: { id: string; name: string } | null } | null
+  batch: { name: string } | null
+  subject: { id: string; name: string } | null
   exam_doctors: Array<{ doctor_id: string; doctor: { name: string } | null }> | null
 }
 
@@ -572,7 +573,8 @@ export default function ExamEditPage({ params }: { params: Promise<{ serial: str
         .from('exams')
         .select(`
           id, title, exam_type, calendar_year, status, question_count,
-          batch:batches(name, subject:subjects(id, name)),
+          batch:batches(name),
+          subject:subjects(id, name),
           exam_doctors(doctor_id, doctor:doctors(name))
         `)
         .eq('serial_number', serial)
@@ -592,7 +594,7 @@ export default function ExamEditPage({ params }: { params: Promise<{ serial: str
         setQuestions(qRes.data ?? [])
       }
 
-      const subjectId = (examData?.batch as any)?.subject?.id
+      const subjectId = examData?.subject?.id
       if (subjectId) {
         const chRes = await supabase
           .from('chapters')
@@ -642,7 +644,7 @@ export default function ExamEditPage({ params }: { params: Promise<{ serial: str
   }
 
   // ── Derived ──────────────────────────────────────────────────────────────────
-  const subjectName  = (exam?.batch as any)?.subject?.name ?? ''
+  const subjectName  = exam?.subject?.name ?? ''
   const batchName    = (exam?.batch as any)?.name ?? ''
   const isPublished  = exam?.status === 'published'
 
