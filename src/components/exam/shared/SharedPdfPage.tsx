@@ -73,7 +73,7 @@ export default function SharedPdfPage({ examId, customExamId }: Props) {
       // ── Regular exam ──────────────────────────────────────
       const { data: exam } = await supabase
         .from('exams')
-        .select('title, exam_doctors(doctor:doctors(name)), batch:batches(name, subject:subjects(name))')
+        .select('title, exam_doctors(doctor:doctors(name)), batch:batches(name), subject:subjects(name)')
         .eq('id', examId)
         .single()
 
@@ -83,7 +83,7 @@ export default function SharedPdfPage({ examId, customExamId }: Props) {
         setExamInfo({
           title:        exam.title,
           doctor_name:  doctors.join(', '),
-          subject_name: (exam.batch as any)?.subject?.name || '',
+          subject_name: (exam.subject as any)?.name || '',
           batch_name:   (exam.batch as any)?.name || '',
         })
       }

@@ -1,4 +1,4 @@
-﻿// src/lib/exam-path.ts
+// src/lib/exam-path.ts
 //
 // Builds the URL of an exam's preparation page from its id.
 //   Basic (years 1-3):    /[year]/basic/[semester]/[subject]/[batch]/[examId]
@@ -9,20 +9,16 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-interface ExamRow {
-  id: string
-  batch_id: string | null
-}
-interface BatchRow {
-  id: string
-  slug: string
-  subject_id: string
-}
 interface SubjectRow {
   id: string
   slug: string
   semester_id: string | null
   year_id: string | null
+}
+interface ExamRow {
+  id: string
+  batch: { slug: string } | null
+  subject: SubjectRow | null
 }
 interface SemesterRow {
   id: string
@@ -43,28 +39,17 @@ export async function getExamPrepPath(
   supabase: SupabaseClient,
   examId: string
 ): Promise<string | null> {
+  // The exam, its batch and its subject come back in one request
   const { data: exam } = await supabase
     .from('exams')
-    .select('id, batch_id')
+    .select('id, batch:batches(slug), subject:subjects(id, slug, semester_id, year_id)')
     .eq('id', examId)
     .eq('status', 'published')
     .is('deleted_at', null)
     .maybeSingle<ExamRow>()
-  if (!exam?.batch_id) return null
-
-  const { data: batch } = await supabase
-    .from('batches')
-    .select('id, slug, subject_id')
-    .eq('id', exam.batch_id)
-    .maybeSingle<BatchRow>()
-  if (!batch) return null
-
-  const { data: subject } = await supabase
-    .from('subjects')
-    .select('id, slug, semester_id, year_id')
-    .eq('id', batch.subject_id)
-    .maybeSingle<SubjectRow>()
-  if (!subject) return null
+  const batch = exam?.batch
+  const subject = exam?.subject
+  if (!exam || !batch || !subject) return null
 
   // Basic subjects sit under a semester; clinical subjects sit directly under a year
   let semester: SemesterRow | null = null

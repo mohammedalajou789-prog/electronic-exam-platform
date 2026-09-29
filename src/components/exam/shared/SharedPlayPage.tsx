@@ -1,4 +1,4 @@
-﻿// src/components/exam/shared/SharedPlayPage.tsx
+// src/components/exam/shared/SharedPlayPage.tsx
 //
 // Interactive exam page. It is NOT cached: when a logged-in student presses "Continue",
 // it loads their own saved progress. To keep it fast, the regular-exam data is fetched in parallel.
@@ -112,7 +112,8 @@ export default async function SharedPlayPage({ examId, customExamId, resume }: P
       .select(`
         *,
         exam_doctors(doctor:doctors(name)),
-        batch:batches(name, subject:subjects(name))
+        batch:batches(name),
+        subject:subjects(name)
       `)
       .eq('id', examId)
       .eq('status', 'published')
@@ -139,7 +140,7 @@ export default async function SharedPlayPage({ examId, customExamId, resume }: P
       savedProgress={savedProgress}
       target={{ examId, customExamId: null }}
       resume={isResume}
-      subjectName={(exam as any).batch?.subject?.name ?? ''}
+      subjectName={(exam as any).subject?.name ?? ''}
       batchName={(exam as any).batch?.name ?? ''}
     />
   )

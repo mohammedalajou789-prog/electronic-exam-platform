@@ -137,14 +137,12 @@ export async function refreshStudyTip(examId: string): Promise<void> {
   // ── 1. Subject of this exam ───────────────────────────────────────────────
   const { data: exam } = await supabase
     .from('exams')
-    .select('batch:batches(subject:subjects(id, name))')
+    .select('subject:subjects(id, name)')
     .eq('id', examId)
     .maybeSingle()
 
-  // The joined batch may come back as an object or a one-item array
-  type BatchJoin = { subject: SubjectInfo | SubjectInfo[] | null }
-  const batch = firstOf(exam?.batch as unknown as BatchJoin | BatchJoin[] | null)
-  const subject = firstOf(batch?.subject)
+  // The joined subject may come back as an object or a one-item array
+  const subject = firstOf(exam?.subject as unknown as SubjectInfo | SubjectInfo[] | null)
   if (!subject) return
 
   // ── 2. Current session numbers (computed in the database) ─────────────────
