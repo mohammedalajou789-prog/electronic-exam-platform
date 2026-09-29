@@ -62,7 +62,8 @@ async function getDashboardData(userId: string) {
         id, current_question, updated_at, exam_id,
         exam:exams(
           id, title, question_count,
-          batch:batches(name, subject:subjects(name))
+          batch:batches(name),
+          subject:subjects(name)
         )
       `)
       .eq('user_id', userId)
@@ -79,7 +80,7 @@ async function getDashboardData(userId: string) {
           lecture:lectures(name),
           exam:exams(
             title,
-            batch:batches(subject:subjects(name))
+            subject:subjects(name)
           )
         )
       `)
@@ -95,7 +96,7 @@ async function getDashboardData(userId: string) {
           chapter:chapters(name),
           exam:exams(
             title,
-            batch:batches(subject:subjects(name))
+            subject:subjects(name)
           )
         )
       `)
@@ -131,7 +132,7 @@ async function getDashboardData(userId: string) {
   // ── Wrong answers grouped by subject ──────────────────────────────────────
   const wrongBySubject: Record<string, { subjectName: string; count: number }> = {}
   for (const w of wrongRaw ?? []) {
-    const subj = (w.question as any)?.exam?.batch?.subject?.name ?? 'Other'
+    const subj = (w.question as any)?.exam?.subject?.name ?? 'Other'
     if (!wrongBySubject[subj]) wrongBySubject[subj] = { subjectName: subj, count: 0 }
     wrongBySubject[subj].count++
   }
@@ -146,7 +147,7 @@ async function getDashboardData(userId: string) {
   for (const w of wrongRaw ?? []) {
     const ch = (w.question as any)?.chapter?.name
     const lec = (w.question as any)?.lecture?.name
-    const subj = (w.question as any)?.exam?.batch?.subject?.name ?? ''
+    const subj = (w.question as any)?.exam?.subject?.name ?? ''
     if (!ch) continue
     if (!chapterMap[ch]) chapterMap[ch] = { chapter: ch, subject: subj, lectures: new Set(), count: 0 }
     chapterMap[ch].count++
@@ -165,7 +166,7 @@ async function getDashboardData(userId: string) {
   // ── Bookmarks grouped by subject ──────────────────────────────────────────
   const bookmarksBySubject: Record<string, { subjectName: string; count: number }> = {}
   for (const b of bookmarksRaw ?? []) {
-    const subj = (b.question as any)?.exam?.batch?.subject?.name ?? 'Other'
+    const subj = (b.question as any)?.exam?.subject?.name ?? 'Other'
     if (!bookmarksBySubject[subj]) bookmarksBySubject[subj] = { subjectName: subj, count: 0 }
     bookmarksBySubject[subj].count++
   }
@@ -529,7 +530,7 @@ export default async function DashboardPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {progress.map((p: any) => {
                   const exam = p.exam
-                  const subjectName = exam?.batch?.subject?.name ?? ''
+                  const subjectName = exam?.subject?.name ?? ''
                   const batchName = exam?.batch?.name ?? ''
                   const total = exam?.question_count ?? 0
                   const done = p.current_question + 1

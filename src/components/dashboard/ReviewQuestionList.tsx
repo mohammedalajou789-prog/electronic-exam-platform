@@ -267,7 +267,7 @@ function QuestionCard({
 
   const exam = pick(q.exam)
   const batch = pick(exam?.batch)
-  const subject = pick(batch?.subject)?.name ?? null
+  const subject = pick(exam?.subject)?.name ?? null
   const chapter = nameOf(q.chapter)
   const lecture = nameOf(q.lecture)
   const wrongNotes = options.filter(o => o.key !== correct && o.note)

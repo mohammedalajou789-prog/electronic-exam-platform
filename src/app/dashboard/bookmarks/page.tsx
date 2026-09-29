@@ -196,7 +196,8 @@ export default async function BookmarksPage({
         incorrect_explanation_e,
         exam:exams(
           id, title,
-          batch:batches(name, subject:subjects(name))
+          batch:batches(name),
+          subject:subjects(name)
         )
       )
     `)
@@ -207,21 +208,21 @@ export default async function BookmarksPage({
 
   const subjects = [...new Set(
     bookmarks
-      .map((b: any) => b.question?.exam?.batch?.subject?.name)
+      .map((b: any) => b.question?.exam?.subject?.name)
       .filter(Boolean)
   )] as string[]
 
   const activeSubject = (await searchParams).subject ?? null
 
   const filtered = activeSubject
-    ? bookmarks.filter((b: any) => b.question?.exam?.batch?.subject?.name === activeSubject)
+    ? bookmarks.filter((b: any) => b.question?.exam?.subject?.name === activeSubject)
     : bookmarks
 
   // ── Derived values for the layout ─────────────────────────
   const subjectCounts = subjects
     .map(subj => ({
       name: subj,
-      count: bookmarks.filter((b: any) => b.question?.exam?.batch?.subject?.name === subj).length,
+      count: bookmarks.filter((b: any) => b.question?.exam?.subject?.name === subj).length,
     }))
     .sort((a, b) => b.count - a.count)
   const chapterCount = new Set(

@@ -215,7 +215,8 @@ export default async function WrongQuestionsPage({
         incorrect_explanation_e,
         exam:exams(
           id, title,
-          batch:batches(name, subject:subjects(name))
+          batch:batches(name),
+          subject:subjects(name)
         )
       )
     `)
@@ -227,7 +228,7 @@ export default async function WrongQuestionsPage({
   // Extract unique subjects
   const subjects = [...new Set(
     wrong
-      .map((w: any) => w.question?.exam?.batch?.subject?.name)
+      .map((w: any) => w.question?.exam?.subject?.name)
       .filter(Boolean)
   )] as string[]
 
@@ -235,7 +236,7 @@ export default async function WrongQuestionsPage({
 
   // Filter by subject if provided
   const filtered = activeSubject
-    ? wrong.filter((w: any) => w.question?.exam?.batch?.subject?.name === activeSubject)
+    ? wrong.filter((w: any) => w.question?.exam?.subject?.name === activeSubject)
     : wrong
 
   // Chapter stats for the tip
@@ -262,7 +263,7 @@ export default async function WrongQuestionsPage({
   const subjectCounts = subjects
     .map(subj => ({
       name: subj,
-      count: wrong.filter((w: any) => w.question?.exam?.batch?.subject?.name === subj).length,
+      count: wrong.filter((w: any) => w.question?.exam?.subject?.name === subj).length,
     }))
     .sort((a, b) => b.count - a.count)
   const spec = [
