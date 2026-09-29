@@ -306,7 +306,7 @@ export default async function YearPage({ params }: PageProps) {
     const { data: semSubjects, error: semStatsError } = semList.length > 0
       ? await supabase
           .from('subjects')
-          .select('id, semester_id, batches(id, exams(id, question_count, status, deleted_at))')
+          .select('id, semester_id, exams(id, question_count, status, deleted_at)')
           .in('semester_id', semList.map(s => s.id))
       : { data: [] as any[], error: null }
 
@@ -314,8 +314,7 @@ export default async function YearPage({ params }: PageProps) {
 
     const statsBySem = new Map<string, { subjects: number; exams: number; questions: number }>()
     ;(semSubjects ?? []).forEach((s: any) => {
-      const exams = (s.batches ?? [])
-        .flatMap((b: any) => b.exams ?? [])
+      const exams = (s.exams ?? [])
         .filter((e: any) => e.status === 'published' && !e.deleted_at)
       const cur = statsBySem.get(s.semester_id) ?? { subjects: 0, exams: 0, questions: 0 }
       cur.subjects += 1
@@ -408,15 +407,14 @@ export default async function YearPage({ params }: PageProps) {
   // ── CLINICAL → show subjects directly ─────────────────────────────────────
   const { data: rawSubjects, error: subjectsError } = await supabase
     .from('subjects')
-    .select('id, name, slug, display_order, batches(id, exams(id, question_count, status, deleted_at))')
+    .select('id, name, slug, display_order, exams(id, question_count, status, deleted_at)')
     .eq('year_id', academicYear.id)
     .order('display_order', { ascending: true })
 
   assertQuerySucceeded(subjectsError, 'clinical subjects')
 
   const subjects = (rawSubjects || []).map(s => {
-    const exams = (s.batches ?? [])
-      .flatMap((b: any) => b.exams ?? [])
+    const exams = (s.exams ?? [])
       .filter((e: any) => e.status === 'published' && !e.deleted_at)
     return { ...s, examCount: exams.length, questionCount: exams.reduce((n: number, e: any) => n + (e.question_count ?? 0), 0) }
   })

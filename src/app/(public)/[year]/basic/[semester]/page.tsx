@@ -207,15 +207,14 @@ export default async function BasicSemesterPage({ params }: PageProps) {
 
   const { data: rawSubjects, error: subjectsError } = await supabase
     .from('subjects')
-    .select('id, name, slug, display_order, batches(id, exams(id, question_count, status, deleted_at))')
+    .select('id, name, slug, display_order, exams(id, question_count, status, deleted_at)')
     .eq('semester_id', semesterData.id)
     .order('display_order', { ascending: true })
 
   assertQuerySucceeded(subjectsError, 'subjects')
 
   const subjects = (rawSubjects || []).map((s: any) => {
-    const exams = (s.batches ?? [])
-      .flatMap((b: any) => b.exams ?? [])
+    const exams = (s.exams ?? [])
       .filter((e: any) => e.status === 'published' && !e.deleted_at)
     return {
       ...s,
