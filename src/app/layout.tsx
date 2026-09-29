@@ -1,11 +1,17 @@
 ﻿import type { Metadata } from 'next'
-import { Plus_Jakarta_Sans } from 'next/font/google'
+import localFont from 'next/font/local'
 import { ThemeProvider } from '@/components/shared/ThemeProvider'
 import './globals.css'
 
-const plusJakarta = Plus_Jakarta_Sans({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700', '800'],
+// Plus Jakarta Sans, self-hosted: the font file lives in this repo (src/app/fonts),
+// so the build never downloads it from Google (that download sometimes failed
+// and broke the build). Variable font: one file covers every weight (200-800).
+// Latin subset, same as before. License: src/app/fonts/OFL.txt
+const plusJakarta = localFont({
+  src: './fonts/PlusJakartaSans-latin-wght-normal.woff2',
+  weight: '200 800',
+  style: 'normal',
+  display: 'swap',
 })
 
 export const metadata: Metadata = {
