@@ -1,18 +1,14 @@
 ﻿import type { Metadata } from 'next'
-import localFont from 'next/font/local'
+import { preload } from 'react-dom'
 import { ThemeProvider } from '@/components/shared/ThemeProvider'
 import './globals.css'
 
-// Plus Jakarta Sans, self-hosted: the font file lives in this repo (src/app/fonts),
-// so the build never downloads it from Google (that download sometimes failed
-// and broke the build). Variable font: one file covers every weight (200-800).
-// Latin subset, same as before. License: src/app/fonts/OFL.txt
-const plusJakarta = localFont({
-  src: './fonts/PlusJakartaSans-latin-wght-normal.woff2',
-  weight: '200 800',
-  style: 'normal',
-  display: 'swap',
-})
+// Plus Jakarta Sans is self-hosted: public/fonts/PlusJakartaSans-latin-wght-normal.woff2
+// (variable font, weights 200-800, latin subset; license: public/fonts/OFL.txt).
+// It is registered in globals.css under its real name "Plus Jakarta Sans", which is
+// the name the pages use in their own styles. The build never downloads fonts
+// from Google any more (that download sometimes failed and broke the build).
+const FONT_FILE = '/fonts/PlusJakartaSans-latin-wght-normal.woff2'
 
 export const metadata: Metadata = {
   title: 'Medical Club — Exam Platform',
@@ -32,9 +28,12 @@ export default function RootLayout({
 }: {
   children: React.ReactNode
 }) {
+  // Start downloading the font right away, before the CSS asks for it
+  preload(FONT_FILE, { as: 'font', type: 'font/woff2', crossOrigin: 'anonymous' })
+
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${plusJakarta.className} antialiased`}>
+      <body className="antialiased">
         <ThemeProvider>
           {children}
         </ThemeProvider>
