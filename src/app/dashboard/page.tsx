@@ -4,6 +4,8 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import EndSessionButton from '@/components/dashboard/EndSessionButton'
 import StatInfo from '@/components/dashboard/StatInfo'
+import ReportsButton, { type DashboardReport } from '@/components/dashboard/ReportsButton'
+import SubjectProgressList from '@/components/dashboard/SubjectProgressList'
 
 import AcademicYearsSection from '@/components/shared/AcademicYearsSection'
 import { dismissStudyTip } from '@/app/actions/dismiss-study-tip'
@@ -143,7 +145,7 @@ async function getDashboardData(userId: string) {
       .select('id, category, status, created_at')
       .eq('reporter_user_id', userId)
       .order('created_at', { ascending: false })
-      .limit(4),
+      .limit(20),
 
     supabase
       .from('study_tips')
@@ -194,17 +196,6 @@ async function getDashboardData(userId: string) {
   // ── Wrong answers grouped by subject ──────────────────────────────────────
   const wrongBySubject = (wrong?.by_subject ?? []).map(s => ({ subjectName: s.subject, count: s.count }))
 
-  // ── Weakest chapter (focus area): the chapter with most wrong questions ───
-  const weakestRaw = wrong?.by_chapter?.[0] ?? null
-  const weakestChapter = weakestRaw
-    ? {
-        chapter: weakestRaw.chapter,
-        subject: weakestRaw.subject,
-        count: weakestRaw.count,
-        lectures: weakestRaw.lectures.slice(0, 3).map(l => l.lecture),
-      }
-    : null
-
   // ── Bookmarks grouped by subject ──────────────────────────────────────────
   const bookmarksBySubject: Record<string, { subjectName: string; count: number }> = {}
   for (const b of bookmarksRaw ?? []) {
@@ -220,10 +211,9 @@ async function getDashboardData(userId: string) {
     subjectChart,
     wrongBySubject,
     totalWrong: wrong?.total ?? 0,
-    weakestChapter,
     bookmarksBySubject: Object.values(bookmarksBySubject),
     totalBookmarks: (bookmarksRaw ?? []).length,
-    recentReports: recentReports ?? [],
+    recentReports: (recentReports ?? []) as DashboardReport[],
     studyTips: studyTipsRaw ?? [],
   }
 }
@@ -244,30 +234,15 @@ function timeAgo(iso: string): string {
   return `${months} month${months === 1 ? '' : 's'} ago`
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-GB', {
-    day: '2-digit', month: 'short', year: 'numeric',
-  })
-}
-
 function initialsOf(text: string): string {
   const clean = (text || '').trim()
   if (!clean) return '??'
   return clean.slice(0, 2).toUpperCase()
 }
 
-function perfColor(pct: number): string {
-  if (pct >= 70) return 'var(--perf-high)'
-  if (pct >= 40) return 'var(--perf-mid)'
-  return 'var(--perf-low)'
-}
-
-const REPORT_TONE: Record<string, { bg: string; fg: string; label: string }> = {
-  resolved:     { bg: 'var(--tone-green-bg)', fg: 'var(--tone-green-fg)', label: 'Resolved'    },
-  under_review: { bg: 'var(--tone-navy-bg)',  fg: 'var(--tone-navy-fg)',  label: 'In progress' },
-  new:          { bg: 'var(--tone-amber-bg)', fg: 'var(--tone-amber-fg)', label: 'New'         },
-  rejected:     { bg: 'var(--bg-soft)',       fg: 'var(--fg-muted)',      label: 'Rejected'    },
-}
+/** Stagger index for the shared animation classes in globals.css */
+const stagger = (i: number): React.CSSProperties =>
+  ({ ['--i' as string]: i } as React.CSSProperties)
 
 function withShare<T extends { count: number }>(list: T[]): (T & { share: number })[] {
   const max = Math.max(1, ...list.map(x => x.count))
@@ -288,7 +263,6 @@ export default async function DashboardPage() {
     subjectChart,
     wrongBySubject,
     totalWrong,
-    weakestChapter,
     bookmarksBySubject,
     totalBookmarks,
     recentReports,
@@ -339,7 +313,7 @@ export default async function DashboardPage() {
         }
         .dash-h1   { margin: 0; font-size: clamp(30px, 4vw, 46px); line-height: 1.12; font-weight: 800; letter-spacing: -0.03em; overflow-wrap: anywhere; }
         .dash-lede { margin: 0; font-size: 16px; line-height: 1.65; color: var(--fg-muted); }
-        .dash-hero-cta { display: flex; gap: 12px; flex-shrink: 0; }
+        .dash-hero-cta { display: flex; gap: 12px; flex-shrink: 0; flex-wrap: wrap; }
 
         .dash-btn {
           display: inline-flex; align-items: center; gap: 8px;
@@ -348,6 +322,26 @@ export default async function DashboardPage() {
         }
         .dash-btn-ghost { border: 1px solid var(--bd); background: var(--bg-elev); color: var(--fg); }
         .dash-btn-solid { background: var(--clr-primary); color: #fff; box-shadow: 0 8px 20px color-mix(in srgb, var(--clr-primary) 28%, transparent); }
+        button.dash-btn { font: inherit; font-size: 14.5px; font-weight: 700; cursor: pointer; }
+        .dash-btn-count { min-width: 20px; padding: 1px 7px; border-radius: 999px; background: var(--clr-primary); color: #fff; font-size: 11.5px; font-weight: 800; text-align: center; }
+
+        /* "Browse exams" glides down to the years instead of jumping */
+        html:has(.dash-root) { scroll-behavior: smooth; }
+        #years, #continue { scroll-margin-top: 76px; }
+        @media (prefers-reduced-motion: reduce) { html:has(.dash-root) { scroll-behavior: auto; } }
+
+        /* Long lists keep a fixed height and scroll inside their card */
+        .dash-scroll {
+          max-height: 420px; overflow-y: auto; overscroll-behavior: contain;
+          margin-right: -10px; padding-right: 10px;
+          scrollbar-width: thin; scrollbar-color: var(--bd-strong) transparent;
+        }
+        .dash-scroll::-webkit-scrollbar { width: 8px; }
+        .dash-scroll::-webkit-scrollbar-thumb { background: var(--bd-strong); border-radius: 999px; }
+        .dash-item { transition: border-color var(--dur-2), transform var(--dur-2) var(--ease-out), background-color var(--dur-2); }
+        .dash-item:hover { border-color: var(--bd-strong); transform: translateY(-2px); }
+        .dash-bar-link { transition: border-color var(--dur-2), transform var(--dur-2) var(--ease-out); }
+        .dash-bar-link:hover { border-color: var(--bd-strong); transform: translateX(3px); }
 
         .dash-main { position: relative; z-index: 1; max-width: var(--page-max); margin: -92px auto 0; padding: 0 var(--page-pad); display: flex; flex-direction: column; gap: 24px; }
 
@@ -369,7 +363,6 @@ export default async function DashboardPage() {
         .dash-h2 { margin: 0; font-size: 18px; font-weight: 800; letter-spacing: -0.01em; }
         .dash-pill { font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: var(--bg-soft); color: var(--fg-muted); }
 
-        .dash-row { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; align-items: stretch; }
         .dash-row-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
 
         .dash-item { padding: 16px 18px; border-radius: 14px; background: var(--bg-soft); border: 1px solid var(--bd); }
@@ -386,7 +379,7 @@ export default async function DashboardPage() {
 
         @media (max-width: 1000px) {
           .dash-kpi { grid-template-columns: 1fr 1fr; }
-          .dash-row, .dash-row-2 { grid-template-columns: 1fr; }
+          .dash-row-2 { grid-template-columns: 1fr; }
         }
         @media (max-width: 768px) {
           .dash-hero { padding: 32px var(--page-pad) 110px; }
@@ -403,12 +396,12 @@ export default async function DashboardPage() {
       <section className="dash-hero">
         <div className="dash-hero-inner">
           <div className="dash-hero-text">
-            <span className="dash-badge">
+            <span className="dash-badge a-rise">
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--clr-primary)' }} />
               Personal study dashboard · {today}
             </span>
-            <h1 className="dash-h1">Welcome back, {displayName}</h1>
-            <p className="dash-lede">
+            <h1 className="dash-h1 a-rise" style={stagger(1)}>Welcome back, {displayName}</h1>
+            <p className="dash-lede a-rise" style={stagger(2)}>
               {progress.length > 0
                 ? `You have ${progress.length} exam${progress.length === 1 ? '' : 's'} in progress`
                 : 'No exams in progress'}
@@ -418,14 +411,15 @@ export default async function DashboardPage() {
               {' '}Pick up where you left off, or turn today&apos;s mistakes into tomorrow&apos;s marks.
             </p>
           </div>
-          <div className="dash-hero-cta">
-            <a href="#years" className="dash-btn dash-btn-ghost">
+          <div className="dash-hero-cta a-rise" style={stagger(3)}>
+            <a href="#years" className="dash-btn dash-btn-ghost press">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 3l9 4-9 4-9-4 9-4z" /><path d="M3 12l9 4 9-4" /><path d="M3 16.5l9 4 9-4" />
               </svg>
               Browse exams
             </a>
-            <Link href={resumeHref} className="dash-btn dash-btn-solid">
+            <ReportsButton reports={recentReports} />
+            <Link href={resumeHref} className="dash-btn dash-btn-solid press">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21" /></svg>
               Resume last exam
             </Link>
@@ -437,12 +431,13 @@ export default async function DashboardPage() {
 
         {/* ── KPI row ──────────────────────────────────────────────────────── */}
         <div className="dash-kpi">
-          <div className="dash-panel" style={{ display: 'flex', alignItems: 'center', gap: 22, padding: '22px 24px', boxShadow: '0 18px 40px var(--shadow)' }}>
+          <div className="dash-panel a-rise" style={{ ...stagger(2), display: 'flex', alignItems: 'center', gap: 22, padding: '22px 24px', boxShadow: '0 18px 40px var(--shadow)' }}>
             <div style={{ position: 'relative', width: 88, height: 88, flexShrink: 0 }}>
               <svg width="88" height="88" viewBox="0 0 88 88" style={{ transform: 'rotate(-90deg)' }}>
                 <circle cx="44" cy="44" r="36" fill="none" stroke="var(--panel-dark-bd)" strokeWidth="8" />
                 <circle cx="44" cy="44" r="36" fill="none" stroke="var(--panel-accent)" strokeWidth="8"
-                  strokeLinecap="round" strokeDasharray="226.2" strokeDashoffset={ringOffset} />
+                  strokeLinecap="round" strokeDasharray="226.2" strokeDashoffset={ringOffset}
+                  className="a-ring" style={{ ['--c' as string]: 226.2 } as React.CSSProperties} />
               </svg>
               <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em' }}>
                 {hasAnswers ? `${accuracy}%` : '—'}
@@ -473,7 +468,7 @@ export default async function DashboardPage() {
             </div>
           </div>
 
-          <div className="dash-kpi-box">
+          <div className="dash-kpi-box a-rise lift" style={stagger(3)}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span className="dash-kpi-title">
                 <span className="dash-kpi-label">Questions solved</span>
@@ -486,7 +481,7 @@ export default async function DashboardPage() {
             <div className="dash-kpi-value">{answered.toLocaleString()}</div>
           </div>
 
-          <div className="dash-kpi-box">
+          <div className="dash-kpi-box a-rise lift" style={stagger(4)}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span className="dash-kpi-title">
                 <span className="dash-kpi-label">Time studied</span>
@@ -504,7 +499,7 @@ export default async function DashboardPage() {
             </div>
           </div>
 
-          <div className="dash-kpi-box">
+          <div className="dash-kpi-box a-rise lift" style={stagger(5)}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span className="dash-kpi-title">
                 <span className="dash-kpi-label">Completed exams</span>
@@ -522,7 +517,8 @@ export default async function DashboardPage() {
         {studyTips.map((tip: any) => {
           const daysLeft = Math.ceil((new Date(tip.expires_at).getTime() - Date.now()) / 86400000)
           return (
-            <div key={tip.id} style={{
+            <div key={tip.id} className="a-rise" style={{
+              ...stagger(4),
               display: 'flex', alignItems: 'flex-start', gap: 18, padding: '22px 24px',
               background: 'var(--bg-elev)', borderRadius: 20,
               border: '1px solid color-mix(in srgb, var(--clr-primary) 28%, var(--bd))',
@@ -555,183 +551,89 @@ export default async function DashboardPage() {
           )
         })}
 
-        {/* ── Continue + Focus ─────────────────────────────────────────────── */}
-        <div id="continue" className="dash-row">
-          <section className="dash-card">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, gap: 12, flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <h2 className="dash-h2">Continue studying</h2>
-                <span className="dash-pill">{progress.length}</span>
-              </div>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-muted)' }}>Sorted by last activity</span>
+        {/* ── Continue studying (full width; a long list scrolls inside) ──────── */}
+        <section id="continue" className="dash-card a-rise" style={stagger(5)}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <h2 className="dash-h2">Continue studying</h2>
+              <span className="dash-pill">{progress.length}</span>
             </div>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-muted)' }}>Sorted by last activity</span>
+          </div>
 
-            {progress.length === 0 ? (
-              <div className="dash-empty">No exams in progress. Pick a year below to start one.</div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {progress.map(p => {
-                  const subjectName = p.subjectName
-                  const batchName = p.batchName
-                  const total = p.total
-                  const done = p.answered
-                  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0
-                  return (
-                    <div key={p.id} className="dash-item" style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
-                      <span style={{ width: 46, height: 46, flexShrink: 0, borderRadius: 12, background: 'var(--bg-elev)', border: '1px solid var(--bd)', color: 'var(--clr-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800 }}>
-                        {initialsOf(subjectName || p.title)}
-                      </span>
-                      <div style={{ flexGrow: 1, minWidth: 180, display: 'flex', flexDirection: 'column', gap: 7 }}>
-                        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
-                          <span style={{ fontSize: 14.5, fontWeight: 700 }}>{p.title}</span>
-                          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-muted)', flexShrink: 0 }}>{timeAgo(p.lastActivity)}</span>
-                        </div>
-                        {(subjectName || batchName) && (
-                          <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--fg-muted)' }}>
-                            {subjectName}{batchName ? ` · ${batchName}` : ''}
-                          </span>
-                        )}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                          <div className="dash-track" style={{ flexGrow: 1 }}>
-                            <div className="dash-track-fill" style={{ width: `${pct}%`, background: 'var(--clr-primary)' }} />
-                          </div>
-                          <span className="dash-mono" title="Questions answered in this attempt" style={{ fontSize: 12, fontWeight: 600, color: 'var(--clr-primary)', flexShrink: 0 }}>
-                            {done} / {total || '?'}
-                          </span>
-                        </div>
+          {progress.length === 0 ? (
+            <div className="dash-empty">No exams in progress. Pick a year below to start one.</div>
+          ) : (
+            <div className="dash-scroll" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 520px), 1fr))', gap: 12, alignContent: 'start' }}>
+              {progress.map((p, i) => {
+                const subjectName = p.subjectName
+                const batchName = p.batchName
+                const total = p.total
+                const done = p.answered
+                const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0
+                return (
+                  <div key={p.id} className="dash-item a-rise" style={{ ...stagger(Math.min(i, 8)), display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+                    <span style={{ width: 46, height: 46, flexShrink: 0, borderRadius: 12, background: 'var(--bg-elev)', border: '1px solid var(--bd)', color: 'var(--clr-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800 }}>
+                      {initialsOf(subjectName || p.title)}
+                    </span>
+                    <div style={{ flexGrow: 1, minWidth: 180, display: 'flex', flexDirection: 'column', gap: 7 }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
+                        <span style={{ fontSize: 14.5, fontWeight: 700 }}>{p.title}</span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-muted)', flexShrink: 0 }}>{timeAgo(p.lastActivity)}</span>
                       </div>
-                      <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                        <Link href={`/dashboard/resume/${p.examId}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '10px 16px', borderRadius: 10, background: 'var(--clr-primary)', color: '#fff', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21" /></svg>
-                          Continue
-                        </Link>
-                        <EndSessionButton examId={p.examId} />
+                      {(subjectName || batchName) && (
+                        <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--fg-muted)' }}>
+                          {subjectName}{batchName ? ` · ${batchName}` : ''}
+                        </span>
+                      )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div className="dash-track" style={{ flexGrow: 1 }}>
+                          <div className="dash-track-fill a-grow" style={{ ...stagger(Math.min(i, 8)), width: `${pct}%`, background: 'var(--clr-primary)' }} />
+                        </div>
+                        <span className="dash-mono" title="Questions answered in this attempt" style={{ fontSize: 12, fontWeight: 600, color: 'var(--clr-primary)', flexShrink: 0 }}>
+                          {done} / {total || '?'}
+                        </span>
                       </div>
                     </div>
-                  )
-                })}
-              </div>
-            )}
-          </section>
-
-          <section className="dash-panel" style={{ position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 16, padding: 26 }}>
-            <div style={{ position: 'absolute', top: -90, right: -90, width: 240, height: 240, borderRadius: '50%', background: 'radial-gradient(circle, color-mix(in srgb, var(--panel-accent) 35%, transparent), transparent 70%)' }} />
-            <span className="dash-eyebrow" style={{ position: 'relative', alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 7, color: 'var(--panel-accent-2)' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="4" /></svg>
-              Focus area
-            </span>
-
-            {weakestChapter ? (
-              <>
-                <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--panel-dark-mut)' }}>Your weakest chapter</span>
-                  <span style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.15 }}>{weakestChapter.chapter}</span>
-                  <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--panel-dark-mut)' }}>
-                    {weakestChapter.count} wrong answer{weakestChapter.count === 1 ? '' : 's'}
-                    {weakestChapter.subject ? ` · ${weakestChapter.subject}` : ''}
-                  </span>
-                </div>
-                {weakestChapter.lectures.length > 0 && (
-                  <div style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {weakestChapter.lectures.map(lec => (
-                      <span key={lec} style={{ fontSize: 12, fontWeight: 600, padding: '5px 11px', borderRadius: 999, background: 'color-mix(in srgb, var(--panel-dark-fg) 8%, transparent)', border: '1px solid var(--panel-dark-bd)' }}>
-                        {lec}
-                      </span>
-                    ))}
+                    <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                      <Link href={`/dashboard/resume/${p.examId}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '10px 16px', borderRadius: 10, background: 'var(--clr-primary)', color: '#fff', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21" /></svg>
+                        Continue
+                      </Link>
+                      <EndSessionButton examId={p.examId} />
+                    </div>
                   </div>
-                )}
-                <div style={{ flexGrow: 1 }} />
-                <Link href="/dashboard/wrong-questions" style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '13px 18px', borderRadius: 12, background: 'var(--panel-dark-fg)', color: 'var(--panel-dark)', fontSize: 14, fontWeight: 800, textDecoration: 'none' }}>
-                  Review these questions
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M13 6l6 6-6 6" /></svg>
-                </Link>
-              </>
-            ) : (
-              <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 8, flexGrow: 1, justifyContent: 'center' }}>
-                <span style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.02em' }}>Nothing to review</span>
-                <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--panel-dark-mut)' }}>
-                  Solve a few exams and your weakest chapter will show up here.
-                </span>
-              </div>
-            )}
-          </section>
-        </div>
+                )
+              })}
+            </div>
+          )}
+        </section>
 
-        {/* ── Performance + Reports ────────────────────────────────────────── */}
-        <div className="dash-row">
-          <section className="dash-card">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22, gap: 14, flexWrap: 'wrap' }}>
+        {/* ── Progress by subject (click a subject for its details) ────────────── */}
+        <section className="dash-card a-rise" style={stagger(6)}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, gap: 14, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <h2 className="dash-h2">Progress by subject</h2>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: 12, fontWeight: 600, color: 'var(--fg-muted)' }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--perf-high)' }} />70%+</span>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--perf-mid)' }} />40–69%</span>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--perf-low)' }} />Below 40%</span>
-              </div>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-muted)' }}>First-try accuracy · click a subject for details</span>
             </div>
-            {subjectChart.length === 0 ? (
-              <div className="dash-empty">Answer questions in an exam to see your performance here.</div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-                {subjectChart.map(s => {
-                  const color = perfColor(s.pct)
-                  return (
-                    <div key={s.name} style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(90px, 150px) minmax(0, 1fr) 56px', alignItems: 'center', gap: 16 }}>
-                        <span style={{ fontSize: 14, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
-                        <div style={{ position: 'relative', height: 12, borderRadius: 999, background: 'var(--track)', overflow: 'hidden' }}>
-                          <div style={{ position: 'absolute', top: 0, bottom: 0, left: '40%', width: 1, background: 'var(--bd)' }} />
-                          <div style={{ position: 'absolute', top: 0, bottom: 0, left: '70%', width: 1, background: 'var(--bd)' }} />
-                          <div style={{ position: 'relative', height: '100%', borderRadius: 999, width: `${s.pct}%`, background: color }} />
-                        </div>
-                        <span className="dash-mono" title="First-try accuracy" style={{ fontSize: 13.5, fontWeight: 600, textAlign: 'right', color }}>{s.pct}%</span>
-                      </div>
-                      {/* Solved / skipped / not solved yet, out of all questions of the subject */}
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: 12, fontWeight: 600, color: 'var(--fg-muted)' }}>
-                        <span><b style={{ color: 'var(--fg)' }}>{s.solved.toLocaleString()}</b> solved</span>
-                        <span><b style={{ color: 'var(--fg)' }}>{s.skipped.toLocaleString()}</b> skipped</span>
-                        <span><b style={{ color: 'var(--fg)' }}>{s.unsolved.toLocaleString()}</b> not solved yet</span>
-                        <span>of {s.total.toLocaleString()} questions</span>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </section>
-
-          <section className="dash-card">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
-              <span style={{ width: 32, height: 32, borderRadius: 9, background: 'var(--bg-soft)', color: 'var(--fg-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><path d="M4 22v-7" /></svg>
-              </span>
-              <h2 className="dash-h2">My reports</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: 12, fontWeight: 600, color: 'var(--fg-muted)' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--perf-high)' }} />70%+</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--perf-mid)' }} />40–69%</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--perf-low)' }} />Below 40%</span>
             </div>
-            {recentReports.length === 0 ? (
-              <div className="dash-empty">You haven&apos;t reported any questions yet.</div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                {recentReports.map((r: any) => {
-                  const tone = REPORT_TONE[r.status] ?? REPORT_TONE.new
-                  return (
-                    <div key={r.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '13px 0', borderTop: '1px solid var(--bd)' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
-                        <span style={{ fontSize: 13.5, fontWeight: 700, textTransform: 'capitalize' }}>{r.category.replace(/_/g, ' ')}</span>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-muted)' }}>{formatDate(r.created_at)}</span>
-                      </div>
-                      <span style={{ fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 999, background: tone.bg, color: tone.fg, flexShrink: 0 }}>
-                        {tone.label}
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </section>
-        </div>
+          </div>
+          {subjectChart.length === 0 ? (
+            <div className="dash-empty">Answer questions in an exam to see your progress here.</div>
+          ) : (
+            <div className="dash-scroll">
+              <SubjectProgressList subjects={subjectChart} />
+            </div>
+          )}
+        </section>
 
         {/* ── Wrong + Bookmarks ────────────────────────────────────────────── */}
         <div className="dash-row-2">
-          <section className="dash-card">
+          <section className="dash-card a-rise" style={stagger(7)}>
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, gap: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                 <span style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--clr-soft)', color: 'var(--clr-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -752,12 +654,13 @@ export default async function DashboardPage() {
             {wrongRanked.length === 0 ? (
               <div className="dash-empty">No wrong questions yet. Keep it up!</div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {wrongRanked.map(s => (
+              <div className="dash-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {wrongRanked.map((s, i) => (
                   <Link key={s.subjectName} href={`/dashboard/wrong-questions?subject=${encodeURIComponent(s.subjectName)}`}
-                    style={{ display: 'grid', gridTemplateColumns: 'minmax(80px, 130px) minmax(0, 1fr) 90px', alignItems: 'center', gap: 14, padding: '12px 14px', borderRadius: 12, background: 'var(--bg-soft)', border: '1px solid var(--bd)', textDecoration: 'none', color: 'var(--fg)' }}>
+                    className="dash-bar-link a-rise"
+                    style={{ ...stagger(Math.min(i, 8)), display: 'grid', gridTemplateColumns: 'minmax(80px, 130px) minmax(0, 1fr) 90px', alignItems: 'center', gap: 14, padding: '12px 14px', borderRadius: 12, background: 'var(--bg-soft)', border: '1px solid var(--bd)', textDecoration: 'none', color: 'var(--fg)' }}>
                     <span style={{ fontSize: 13.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.subjectName}</span>
-                    <div className="dash-track"><div className="dash-track-fill" style={{ width: `${s.share}%`, background: 'var(--clr-primary)' }} /></div>
+                    <div className="dash-track"><div className="dash-track-fill a-grow" style={{ ...stagger(Math.min(i, 8)), width: `${s.share}%`, background: 'var(--clr-primary)' }} /></div>
                     <span style={{ justifySelf: 'end', fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: 'var(--clr-soft)', color: 'var(--clr-primary)' }}>{s.count} wrong</span>
                   </Link>
                 ))}
@@ -765,7 +668,7 @@ export default async function DashboardPage() {
             )}
           </section>
 
-          <section className="dash-card">
+          <section className="dash-card a-rise" style={stagger(8)}>
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, gap: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                 <span style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--panel-dark)', color: 'var(--panel-dark-fg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -786,12 +689,13 @@ export default async function DashboardPage() {
             {bookmarksRanked.length === 0 ? (
               <div className="dash-empty">No bookmarked questions yet.</div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {bookmarksRanked.map(s => (
+              <div className="dash-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {bookmarksRanked.map((s, i) => (
                   <Link key={s.subjectName} href={`/dashboard/bookmarks?subject=${encodeURIComponent(s.subjectName)}`}
-                    style={{ display: 'grid', gridTemplateColumns: 'minmax(80px, 130px) minmax(0, 1fr) 90px', alignItems: 'center', gap: 14, padding: '12px 14px', borderRadius: 12, background: 'var(--bg-soft)', border: '1px solid var(--bd)', textDecoration: 'none', color: 'var(--fg)' }}>
+                    className="dash-bar-link a-rise"
+                    style={{ ...stagger(Math.min(i, 8)), display: 'grid', gridTemplateColumns: 'minmax(80px, 130px) minmax(0, 1fr) 90px', alignItems: 'center', gap: 14, padding: '12px 14px', borderRadius: 12, background: 'var(--bg-soft)', border: '1px solid var(--bd)', textDecoration: 'none', color: 'var(--fg)' }}>
                     <span style={{ fontSize: 13.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.subjectName}</span>
-                    <div className="dash-track"><div className="dash-track-fill" style={{ width: `${s.share}%`, background: 'var(--panel-dark)' }} /></div>
+                    <div className="dash-track"><div className="dash-track-fill a-grow" style={{ ...stagger(Math.min(i, 8)), width: `${s.share}%`, background: 'var(--panel-dark)' }} /></div>
                     <span style={{ justifySelf: 'end', fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: 'var(--bg-soft)', color: 'var(--fg)', border: '1px solid var(--bd)' }}>{s.count} saved</span>
                   </Link>
                 ))}
