@@ -83,7 +83,9 @@ const STAT_HELP = {
   time:
     'Time spent solving questions in interactive exams, including exams you did not finish. The timer pauses while you are on another tab or window.',
   completed:
-    'The number of different exams you finished by pressing Finish. Retaking the same exam does not add to this number.',
+    'The number of different exams you finished, by pressing Finish in the exam or End Session here. Retaking the same exam does not add to this number.',
+  subjects:
+    'For each subject: the share of questions you got right on your first try (the same rule as Overall accuracy). Click a subject to see how many of its questions you solved, skipped or have not solved yet.',
 } as const
 
 // ── Data fetching ──────────────────────────────────────────────────────────────
@@ -186,6 +188,7 @@ async function getDashboardData(userId: string) {
     .map(s => ({
       name: s.subject,
       pct: s.solved > 0 ? Math.round((s.correct / s.solved) * 100) : 0,
+      correct: s.correct,
       total: s.total,
       solved: s.solved,
       skipped: s.skipped,
@@ -279,7 +282,9 @@ export default async function DashboardPage() {
   const studyHours = Math.floor(totalMinutes / 60)
   const studyMins = totalMinutes % 60
 
-  const displayName = profile?.display_name || user.email?.split('@')[0] || 'Student'
+  // Greet with the first name only ("Mohammed El-Ajou" -> "Mohammed")
+  const firstName =
+    (profile?.display_name ?? '').trim().split(/\s+/)[0] || user.email?.split('@')[0] || 'Student'
   const today = new Date().toLocaleDateString('en-GB', {
     weekday: 'long', day: 'numeric', month: 'long',
   })
@@ -304,8 +309,8 @@ export default async function DashboardPage() {
           background-image: radial-gradient(color-mix(in srgb, var(--clr-primary) 14%, transparent) 1px, transparent 1px);
           background-size: 26px 26px;
         }
-        .dash-hero-inner { max-width: var(--page-max); margin: 0 auto; display: flex; align-items: flex-start; justify-content: space-between; gap: 40px; flex-wrap: wrap; }
-        .dash-hero-text  { display: flex; flex-direction: column; gap: 14px; max-width: 700px; }
+        .dash-hero-inner { max-width: var(--page-max); margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 40px; }
+        .dash-hero-text  { display: flex; flex-direction: column; gap: 14px; max-width: 760px; min-width: 0; }
         .dash-badge {
           align-self: flex-start; display: inline-flex; align-items: center; gap: 8px;
           padding: 6px 14px; border-radius: 999px; background: var(--bg-elev);
@@ -313,7 +318,9 @@ export default async function DashboardPage() {
         }
         .dash-h1   { margin: 0; font-size: clamp(30px, 4vw, 46px); line-height: 1.12; font-weight: 800; letter-spacing: -0.03em; overflow-wrap: anywhere; }
         .dash-lede { margin: 0; font-size: 16px; line-height: 1.65; color: var(--fg-muted); }
-        .dash-hero-cta { display: flex; gap: 12px; flex-shrink: 0; flex-wrap: wrap; }
+        /* The three actions sit in a column beside the welcome text */
+        .dash-hero-cta { display: flex; flex-direction: column; gap: 10px; flex-shrink: 0; width: 250px; }
+        .dash-hero-cta .dash-btn { width: 100%; justify-content: flex-start; }
 
         .dash-btn {
           display: inline-flex; align-items: center; gap: 8px;
@@ -323,21 +330,31 @@ export default async function DashboardPage() {
         .dash-btn-ghost { border: 1px solid var(--bd); background: var(--bg-elev); color: var(--fg); }
         .dash-btn-solid { background: var(--clr-primary); color: #fff; box-shadow: 0 8px 20px color-mix(in srgb, var(--clr-primary) 28%, transparent); }
         button.dash-btn { font: inherit; font-size: 14.5px; font-weight: 700; cursor: pointer; }
-        .dash-btn-count { min-width: 20px; padding: 1px 7px; border-radius: 999px; background: var(--clr-primary); color: #fff; font-size: 11.5px; font-weight: 800; text-align: center; }
+        /* "Browse exams" is the main action: solid and gently pulsing to draw the eye */
+        @keyframes dash-beat { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.035); } }
+        @keyframes dash-glow {
+          0%   { box-shadow: 0 8px 20px color-mix(in srgb, var(--clr-primary) 28%, transparent), 0 0 0 0 color-mix(in srgb, var(--clr-primary) 45%, transparent); }
+          70%  { box-shadow: 0 8px 20px color-mix(in srgb, var(--clr-primary) 28%, transparent), 0 0 0 14px transparent; }
+          100% { box-shadow: 0 8px 20px color-mix(in srgb, var(--clr-primary) 28%, transparent), 0 0 0 0 transparent; }
+        }
+        .dash-btn-hot { animation: dash-glow 2s ease-out infinite, dash-beat 2s ease-in-out infinite; }
+        .dash-btn-hot:hover { animation-play-state: paused; }
+        @media (prefers-reduced-motion: reduce) { .dash-btn-hot { animation: none; } }
+        .dash-btn-count { margin-left: auto; min-width: 20px; padding: 1px 7px; border-radius: 999px; background: var(--clr-primary); color: #fff; font-size: 11.5px; font-weight: 800; text-align: center; }
 
         /* "Browse exams" glides down to the years instead of jumping */
         html:has(.dash-root) { scroll-behavior: smooth; }
         #years, #continue { scroll-margin-top: 76px; }
         @media (prefers-reduced-motion: reduce) { html:has(.dash-root) { scroll-behavior: auto; } }
 
-        /* Long lists keep a fixed height and scroll inside their card */
+        /* Long lists keep a fixed height and scroll inside their card (scrollbar hidden) */
         .dash-scroll {
           max-height: 420px; overflow-y: auto; overscroll-behavior: contain;
-          margin-right: -10px; padding-right: 10px;
-          scrollbar-width: thin; scrollbar-color: var(--bd-strong) transparent;
+          scrollbar-width: none; -ms-overflow-style: none;
+          /* room for the hover lift so items are not clipped at the edges */
+          padding: 3px 4px 3px 0; margin: -3px -4px -3px 0;
         }
-        .dash-scroll::-webkit-scrollbar { width: 8px; }
-        .dash-scroll::-webkit-scrollbar-thumb { background: var(--bd-strong); border-radius: 999px; }
+        .dash-scroll::-webkit-scrollbar { display: none; }
         .dash-item { transition: border-color var(--dur-2), transform var(--dur-2) var(--ease-out), background-color var(--dur-2); }
         .dash-item:hover { border-color: var(--bd-strong); transform: translateY(-2px); }
         .dash-bar-link { transition: border-color var(--dur-2), transform var(--dur-2) var(--ease-out); }
@@ -364,6 +381,13 @@ export default async function DashboardPage() {
         .dash-pill { font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: var(--bg-soft); color: var(--fg-muted); }
 
         .dash-row-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+        .dash-fixed { height: 520px; display: flex; flex-direction: column; min-width: 0; }
+        .dash-fixed > .dash-scroll { flex: 1 1 auto; min-height: 0; max-height: none; }
+        .dash-panel-card {
+          padding: 26px; box-shadow: 0 18px 40px var(--shadow);
+          /* Performance colors bright enough to read on the dark panel */
+          --sp-high: #4ade80; --sp-mid: #fbbf24; --sp-low: var(--panel-accent);
+        }
 
         .dash-item { padding: 16px 18px; border-radius: 14px; background: var(--bg-soft); border: 1px solid var(--bd); }
         .dash-track { height: 6px; border-radius: 999px; background: var(--track); overflow: hidden; }
@@ -380,15 +404,19 @@ export default async function DashboardPage() {
         @media (max-width: 1000px) {
           .dash-kpi { grid-template-columns: 1fr 1fr; }
           .dash-row-2 { grid-template-columns: 1fr; }
+          .dash-fixed { height: auto; }
+          .dash-fixed > .dash-scroll { max-height: 420px; }
         }
         @media (max-width: 768px) {
           .dash-hero { padding: 32px var(--page-pad) 110px; }
           .dash-hero-inner { flex-direction: column; align-items: stretch; gap: 22px; }
+          .dash-hero-cta { width: 100%; }
+          .dash-hero-cta .dash-btn { justify-content: center; }
           .dash-h1 { font-size: 30px; }
           .dash-lede { font-size: 14.5px; }
           .dash-main { padding: 0 var(--page-pad); margin-top: -84px; }
           .dash-kpi { grid-template-columns: 1fr; }
-          .dash-card { padding: 20px; }
+          .dash-card, .dash-panel-card { padding: 20px; }
         }
       `}</style>
 
@@ -400,7 +428,7 @@ export default async function DashboardPage() {
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--clr-primary)' }} />
               Personal study dashboard · {today}
             </span>
-            <h1 className="dash-h1 a-rise" style={stagger(1)}>Welcome back, {displayName}</h1>
+            <h1 className="dash-h1 a-rise" style={stagger(1)}>Welcome back, {firstName}</h1>
             <p className="dash-lede a-rise" style={stagger(2)}>
               {progress.length > 0
                 ? `You have ${progress.length} exam${progress.length === 1 ? '' : 's'} in progress`
@@ -412,14 +440,14 @@ export default async function DashboardPage() {
             </p>
           </div>
           <div className="dash-hero-cta a-rise" style={stagger(3)}>
-            <a href="#years" className="dash-btn dash-btn-ghost press">
+            <a href="#years" className="dash-btn dash-btn-solid dash-btn-hot press">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 3l9 4-9 4-9-4 9-4z" /><path d="M3 12l9 4 9-4" /><path d="M3 16.5l9 4 9-4" />
               </svg>
               Browse exams
             </a>
             <ReportsButton reports={recentReports} />
-            <Link href={resumeHref} className="dash-btn dash-btn-solid press">
+            <Link href={resumeHref} className="dash-btn dash-btn-ghost press">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21" /></svg>
               Resume last exam
             </Link>
@@ -551,85 +579,90 @@ export default async function DashboardPage() {
           )
         })}
 
-        {/* ── Continue studying (full width; a long list scrolls inside) ──────── */}
-        <section id="continue" className="dash-card a-rise" style={stagger(5)}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, gap: 12, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <h2 className="dash-h2">Continue studying</h2>
-              <span className="dash-pill">{progress.length}</span>
+        {/* ── Continue studying + Progress by subject (side by side, fixed height) ── */}
+        <div className="dash-row-2">
+          <section id="continue" className="dash-card dash-fixed a-rise" style={stagger(5)}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <h2 className="dash-h2">Continue studying</h2>
+                <span className="dash-pill">{progress.length}</span>
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-muted)' }}>Sorted by last activity</span>
             </div>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-muted)' }}>Sorted by last activity</span>
-          </div>
 
-          {progress.length === 0 ? (
-            <div className="dash-empty">No exams in progress. Pick a year below to start one.</div>
-          ) : (
-            <div className="dash-scroll" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 520px), 1fr))', gap: 12, alignContent: 'start' }}>
-              {progress.map((p, i) => {
-                const subjectName = p.subjectName
-                const batchName = p.batchName
-                const total = p.total
-                const done = p.answered
-                const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0
-                return (
-                  <div key={p.id} className="dash-item a-rise" style={{ ...stagger(Math.min(i, 8)), display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
-                    <span style={{ width: 46, height: 46, flexShrink: 0, borderRadius: 12, background: 'var(--bg-elev)', border: '1px solid var(--bd)', color: 'var(--clr-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800 }}>
-                      {initialsOf(subjectName || p.title)}
-                    </span>
-                    <div style={{ flexGrow: 1, minWidth: 180, display: 'flex', flexDirection: 'column', gap: 7 }}>
-                      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
-                        <span style={{ fontSize: 14.5, fontWeight: 700 }}>{p.title}</span>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-muted)', flexShrink: 0 }}>{timeAgo(p.lastActivity)}</span>
-                      </div>
-                      {(subjectName || batchName) && (
-                        <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--fg-muted)' }}>
-                          {subjectName}{batchName ? ` · ${batchName}` : ''}
-                        </span>
-                      )}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <div className="dash-track" style={{ flexGrow: 1 }}>
-                          <div className="dash-track-fill a-grow" style={{ ...stagger(Math.min(i, 8)), width: `${pct}%`, background: 'var(--clr-primary)' }} />
+            {progress.length === 0 ? (
+              <div className="dash-empty">No exams in progress. Pick a year below to start one.</div>
+            ) : (
+              <div className="dash-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {progress.map((p, i) => {
+                  const subjectName = p.subjectName
+                  const batchName = p.batchName
+                  const total = p.total
+                  const done = p.answered
+                  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0
+                  return (
+                    <div key={p.id} className="dash-item a-rise" style={{ ...stagger(Math.min(i, 8)), display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+                      <span style={{ width: 46, height: 46, flexShrink: 0, borderRadius: 12, background: 'var(--bg-elev)', border: '1px solid var(--bd)', color: 'var(--clr-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800 }}>
+                        {initialsOf(subjectName || p.title)}
+                      </span>
+                      <div style={{ flexGrow: 1, minWidth: 180, display: 'flex', flexDirection: 'column', gap: 7 }}>
+                        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
+                          <span style={{ fontSize: 14.5, fontWeight: 700 }}>{p.title}</span>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-muted)', flexShrink: 0 }}>{timeAgo(p.lastActivity)}</span>
                         </div>
-                        <span className="dash-mono" title="Questions answered in this attempt" style={{ fontSize: 12, fontWeight: 600, color: 'var(--clr-primary)', flexShrink: 0 }}>
-                          {done} / {total || '?'}
-                        </span>
+                        {(subjectName || batchName) && (
+                          <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--fg-muted)' }}>
+                            {subjectName}{batchName ? ` · ${batchName}` : ''}
+                          </span>
+                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <div className="dash-track" style={{ flexGrow: 1 }}>
+                            <div className="dash-track-fill a-grow" style={{ ...stagger(Math.min(i, 8)), width: `${pct}%`, background: 'var(--clr-primary)' }} />
+                          </div>
+                          <span className="dash-mono" title="Questions answered in this attempt" style={{ fontSize: 12, fontWeight: 600, color: 'var(--clr-primary)', flexShrink: 0 }}>
+                            {done} / {total || '?'}
+                          </span>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                        <Link href={`/dashboard/resume/${p.examId}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '10px 16px', borderRadius: 10, background: 'var(--clr-primary)', color: '#fff', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21" /></svg>
+                          Continue
+                        </Link>
+                        <EndSessionButton attemptId={p.id} examTitle={p.title} />
                       </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                      <Link href={`/dashboard/resume/${p.examId}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '10px 16px', borderRadius: 10, background: 'var(--clr-primary)', color: '#fff', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21" /></svg>
-                        Continue
-                      </Link>
-                      <EndSessionButton examId={p.examId} />
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </section>
+                  )
+                })}
+              </div>
+            )}
+          </section>
 
-        {/* ── Progress by subject (click a subject for its details) ────────────── */}
-        <section className="dash-card a-rise" style={stagger(6)}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, gap: 14, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <h2 className="dash-h2">Progress by subject</h2>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-muted)' }}>First-try accuracy · click a subject for details</span>
+          {/* Styled like the "Overall accuracy" panel; click a subject for details */}
+          <section className="dash-panel dash-panel-card dash-fixed a-rise" style={stagger(6)}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, gap: 14, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span className="dash-kpi-title">
+                  <h2 className="dash-h2">Progress by subject</h2>
+                  <StatInfo label="Progress by subject" description={STAT_HELP.subjects} tone="dark" />
+                </span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--panel-dark-mut)' }}>First-try accuracy · click a subject for details</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: 12, fontWeight: 600, color: 'var(--panel-dark-mut)' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--sp-high)' }} />70%+</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--sp-mid)' }} />40–69%</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--sp-low)' }} />Below 40%</span>
+              </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: 12, fontWeight: 600, color: 'var(--fg-muted)' }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--perf-high)' }} />70%+</span>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--perf-mid)' }} />40–69%</span>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--perf-low)' }} />Below 40%</span>
-            </div>
-          </div>
-          {subjectChart.length === 0 ? (
-            <div className="dash-empty">Answer questions in an exam to see your progress here.</div>
-          ) : (
-            <div className="dash-scroll">
-              <SubjectProgressList subjects={subjectChart} />
-            </div>
-          )}
-        </section>
+            {subjectChart.length === 0 ? (
+              <div className="dash-empty" style={{ color: 'var(--panel-dark-mut)' }}>Answer questions in an exam to see your progress here.</div>
+            ) : (
+              <div className="dash-scroll">
+                <SubjectProgressList subjects={subjectChart} />
+              </div>
+            )}
+          </section>
+        </div>
 
         {/* ── Wrong + Bookmarks ────────────────────────────────────────────── */}
         <div className="dash-row-2">

@@ -3,8 +3,9 @@
 // src/components/dashboard/SubjectProgressList.tsx
 //
 // "Progress by subject" on the dashboard: one row per subject with its first-try
-// accuracy. Clicking a subject opens a popup with the details
-// (solved / skipped / not solved yet out of all its questions).
+// accuracy, inside the dark panel (same colors as "Overall accuracy"). Clicking a
+// subject opens a popup with the details (solved / skipped / not solved yet out
+// of all its questions).
 
 import { useCallback, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
@@ -14,6 +15,8 @@ export interface SubjectProgress {
   name: string
   /** First-try accuracy, 0-100 */
   pct: number
+  /** Solved questions whose first answer was right */
+  correct: number
   total: number
   solved: number
   skipped: number
@@ -24,6 +27,14 @@ interface Props {
   subjects: SubjectProgress[]
 }
 
+/** Colors for the rows on the dark panel (bright enough to read on it) */
+function rowColor(pct: number): string {
+  if (pct >= 70) return 'var(--sp-high)'
+  if (pct >= 40) return 'var(--sp-mid)'
+  return 'var(--sp-low)'
+}
+
+/** Colors for the popup (light card, follows the theme) */
 function perfColor(pct: number): string {
   if (pct >= 70) return 'var(--perf-high)'
   if (pct >= 40) return 'var(--perf-mid)'
@@ -34,20 +45,21 @@ const stagger = (i: number): React.CSSProperties =>
   ({ ['--i' as string]: i } as React.CSSProperties)
 
 const LIST_CSS = `
-  .sp-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 10px 28px; }
+  .sp-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); gap: 6px 28px; }
   .sp-row {
     display: grid; grid-template-columns: minmax(90px, 150px) minmax(0, 1fr) 52px 18px; align-items: center; gap: 14px;
     width: 100%; padding: 12px 12px; border-radius: 12px; border: 1px solid transparent; background: transparent;
-    color: var(--fg); font: inherit; text-align: left; cursor: pointer;
+    color: var(--panel-dark-fg); font: inherit; text-align: left; cursor: pointer;
+    transition: background-color var(--dur-2), border-color var(--dur-2);
   }
-  .sp-row:hover { background: var(--bg-soft); border-color: var(--bd); }
-  .sp-row:focus-visible { outline: 2px solid var(--clr-primary); outline-offset: 2px; }
+  .sp-row:hover { background: color-mix(in srgb, var(--panel-dark-fg) 7%, transparent); border-color: var(--panel-dark-bd); }
+  .sp-row:focus-visible { outline: 2px solid var(--panel-accent); outline-offset: 2px; }
   .sp-name { font-size: 14px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sp-track { position: relative; height: 12px; border-radius: 999px; background: var(--track); overflow: hidden; }
-  .sp-mark { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--bd); }
+  .sp-track { position: relative; height: 12px; border-radius: 999px; background: color-mix(in srgb, var(--panel-dark-fg) 12%, transparent); overflow: hidden; }
+  .sp-mark { position: absolute; top: 0; bottom: 0; width: 1px; background: color-mix(in srgb, var(--panel-dark-fg) 24%, transparent); }
   .sp-fill { position: relative; height: 100%; border-radius: 999px; }
   .sp-pct { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 13.5px; font-weight: 600; text-align: right; }
-  .sp-go { color: var(--fg-faint); }
+  .sp-go { color: var(--panel-dark-mut); }
 
   .sp-detail-num { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .sp-tile { padding: 14px; border-radius: 14px; background: var(--bg-soft); border: 1px solid var(--bd); display: flex; flex-direction: column; gap: 6px; }
@@ -60,7 +72,6 @@ const LIST_CSS = `
   .sp-legend span::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--dot); }
 
   @media (max-width: 640px) {
-    .sp-list { grid-template-columns: minmax(0, 1fr); }
     .sp-row { grid-template-columns: minmax(70px, 110px) minmax(0, 1fr) 46px 14px; gap: 10px; padding: 10px 6px; }
   }
 `
@@ -76,7 +87,7 @@ export default function SubjectProgressList({ subjects }: Props) {
       <style dangerouslySetInnerHTML={{ __html: LIST_CSS }} />
       <div className="sp-list">
         {subjects.map((s, i) => {
-          const color = perfColor(s.pct)
+          const color = rowColor(s.pct)
           return (
             <button
               key={s.name}

@@ -7,8 +7,13 @@
 // The explanation is positioned relative to the screen (position: fixed),
 // so it is never squeezed by its parent and always stays inside the screen.
 // It closes on outside click, Escape, scroll, or window resize.
+//
+// The explanation is rendered straight into <body> (a portal): the cards around
+// the "?" animate with a transform, and a transformed parent would trap a
+// position:fixed panel inside the card (the explanation then never appeared).
 
 import { useEffect, useId, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 interface StatInfoProps {
   /** The statistic's name, shown as the heading of the explanation. */
@@ -111,7 +116,7 @@ export default function StatInfo({ label, description, tone = 'light' }: StatInf
         ?
       </button>
 
-      {position && (
+      {position && typeof document !== 'undefined' && createPortal(
         <div
           ref={panelRef}
           id={panelId}
@@ -144,7 +149,8 @@ export default function StatInfo({ label, description, tone = 'light' }: StatInf
             {label}
           </strong>
           {description}
-        </div>
+        </div>,
+        document.body
       )}
     </>
   )
