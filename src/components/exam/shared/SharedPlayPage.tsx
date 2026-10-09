@@ -1,62 +1,117 @@
 // src/components/exam/shared/SharedPlayPage.tsx
 //
-// Interactive exam page. It is NOT cached: when a logged-in student presses "Continue",
-// it loads their own saved progress. To keep it fast, the regular-exam data is fetched in parallel.
+// Interactive exam page. It is NOT cached: it loads the logged-in student's own data
+// ("Continue" restores the open attempt; "unanswered only" picks the questions never
+// answered). To keep it fast, the regular-exam data is fetched in parallel.
 
 import { notFound } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import InteractiveExam from '@/components/exam/InteractiveExam'
 
-/** Saved progress handed to the exam screen when the student resumes */
+/** Progress handed to the exam screen when the student resumes */
 interface ResumeProgress {
-  current_question: number
-  answers_json: Record<string, string>
-  flags_json: string[]
-  elapsed_seconds: number | null
+  currentIndex: number
+  answers: Record<string, string>
+  flaggedIds: string[]
+  viewedIds: string[]
+  elapsedSeconds: number
+  /** null = the whole exam; otherwise the attempt covers only these questions */
+  questionIds: string[] | null
+}
+
+/** Row shape of the open attempt query below */
+interface OpenAttemptRow {
+  current_index: number
+  viewed_ids: string[] | null
+  flagged_ids: string[] | null
+  time_spent: number
+  question_ids: string[] | null
+  attempt_answers: { question_id: string; chosen_answer: string | null }[] | null
+}
+
+/** Shape of the JSON returned by get_my_exam_progress (only the part used here) */
+interface ExamProgressRow {
+  unanswered_ids: string[]
 }
 
 type ServerSupabaseClient = Awaited<ReturnType<typeof createServerSupabaseClient>>
 
+/** The logged-in student's id, or null for guests. */
+async function currentUserId(supabase: ServerSupabaseClient): Promise<string | null> {
+  // getClaims() checks the session locally with the project's public signing key,
+  // so it does not need a network call to Supabase Auth (unlike getUser()).
+  const { data: claimsData } = await supabase.auth.getClaims()
+  return typeof claimsData?.claims?.sub === 'string' ? claimsData.claims.sub : null
+}
+
 /**
- * Returns the logged-in student's unfinished attempt at this exam, or null
- * (guest, no attempt yet, or an attempt with no answers).
- *
- * getClaims() checks the session locally with the project's public signing key,
- * so it does not need a network call to Supabase Auth (unlike getUser()).
+ * Returns the logged-in student's open attempt at this exam, or null
+ * (guest, or no open attempt). Answers come from the answer log, so they are
+ * exactly what the database recorded.
  */
 async function loadResumeProgress(
   supabase: ServerSupabaseClient,
   examId: string
 ): Promise<ResumeProgress | null> {
-  const { data: claimsData } = await supabase.auth.getClaims()
-  const userId = typeof claimsData?.claims?.sub === 'string' ? claimsData.claims.sub : null
+  const userId = await currentUserId(supabase)
   if (!userId) return null
 
-  const { data } = await supabase
-    .from('study_progress')
-    .select('current_question, answers_json, flags_json, elapsed_seconds')
+  const { data, error } = await supabase
+    .from('exam_attempts')
+    .select('current_index, viewed_ids, flagged_ids, time_spent, question_ids, attempt_answers(question_id, chosen_answer)')
     .eq('user_id', userId)
     .eq('exam_id', examId)
-    .eq('completed', false)
+    .eq('status', 'in_progress')
+    .not('attempt_answers.chosen_answer', 'is', null)
     .maybeSingle()
 
-  if (!data || Object.keys(data.answers_json || {}).length === 0) return null
+  if (error) console.error('[SharedPlayPage] Could not load the open attempt:', error.message)
+  if (!data) return null
+
+  const attempt = data as unknown as OpenAttemptRow
+  const answers: Record<string, string> = {}
+  for (const row of attempt.attempt_answers ?? []) {
+    if (row.chosen_answer) answers[row.question_id] = row.chosen_answer
+  }
 
   return {
-    current_question: data.current_question ?? 0,
-    answers_json: data.answers_json ?? {},
-    flags_json: data.flags_json ?? [],
-    elapsed_seconds: data.elapsed_seconds ?? null,
+    currentIndex: attempt.current_index ?? 0,
+    answers,
+    flaggedIds: attempt.flagged_ids ?? [],
+    viewedIds: attempt.viewed_ids ?? [],
+    elapsedSeconds: attempt.time_spent ?? 0,
+    questionIds: attempt.question_ids,
   }
+}
+
+/**
+ * Questions of this exam the student has never answered (skipped + unsolved),
+ * in exam order. Null for guests (they have no history, so they get the whole exam).
+ */
+async function loadUnansweredIds(
+  supabase: ServerSupabaseClient,
+  examId: string
+): Promise<string[] | null> {
+  const userId = await currentUserId(supabase)
+  if (!userId) return null
+
+  const { data, error } = await supabase.rpc('get_my_exam_progress', { p_exam_id: examId })
+  if (error) {
+    console.error('[SharedPlayPage] Could not load unanswered questions:', error.message)
+    return null
+  }
+  return (data as ExamProgressRow | null)?.unanswered_ids ?? null
 }
 
 interface Props {
   examId?: string
   customExamId?: string
   resume?: string
+  /** 'unanswered' = only the questions never answered before */
+  set?: string
 }
 
-export default async function SharedPlayPage({ examId, customExamId, resume }: Props) {
+export default async function SharedPlayPage({ examId, customExamId, resume, set }: Props) {
   const supabase = await createServerSupabaseClient()
 
   // ── Custom Exam ───────────────────────────────────────────
@@ -103,10 +158,11 @@ export default async function SharedPlayPage({ examId, customExamId, resume }: P
   // Starting over is handled by the exam screen itself, so simply opening
   // this page never deletes anything.
   const isResume = resume === 'true'
+  const wantsUnanswered = !isResume && set === 'unanswered'
 
-  // The exam, its questions and the saved progress don't depend on each other,
-  // so they are fetched at the same time: one round trip instead of up to four in a row.
-  const [examRes, questionsRes, savedProgress] = await Promise.all([
+  // The exam, its questions and the student's data don't depend on each other,
+  // so they are fetched at the same time: one round trip instead of several in a row.
+  const [examRes, questionsRes, savedProgress, unansweredIds] = await Promise.all([
     supabase
       .from('exams')
       .select(`
@@ -126,20 +182,28 @@ export default async function SharedPlayPage({ examId, customExamId, resume }: P
       .is('deleted_at', null)
       .order('question_order', { ascending: true }),
     isResume ? loadResumeProgress(supabase, examId) : Promise.resolve(null),
+    wantsUnanswered ? loadUnansweredIds(supabase, examId) : Promise.resolve(null),
   ])
 
   const { data: exam, error } = examRes
   if (error || !exam) notFound()
 
-  const { data: questions } = questionsRes
+  const allQuestions = (questionsRes.data || []) as { id: string }[]
+
+  // Part of the exam: the open attempt's own questions when resuming,
+  // or the questions never answered ("unanswered only", signed-in students)
+  const partIds = savedProgress?.questionIds ?? unansweredIds
+  const partSet = partIds ? new Set(partIds) : null
+  const questions = partSet ? allQuestions.filter(q => partSet.has(q.id)) : allQuestions
 
   return (
     <InteractiveExam
       exam={exam as any}
-      questions={(questions || []) as any}
+      questions={questions as any}
       savedProgress={savedProgress}
       target={{ examId, customExamId: null }}
       resume={isResume}
+      questionSet={partSet ? 'unanswered' : 'all'}
       subjectName={(exam as any).subject?.name ?? ''}
       batchName={(exam as any).batch?.name ?? ''}
     />

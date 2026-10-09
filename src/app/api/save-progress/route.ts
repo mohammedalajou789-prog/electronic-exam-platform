@@ -1,48 +1,44 @@
 ﻿// src/app/api/save-progress/route.ts
 //
-// Called by navigator.sendBeacon() when the student closes the tab
-// or presses the browser Back button during an exam.
+// Called by navigator.sendBeacon() when the student closes the tab, refreshes
+// or presses the browser Back button during an exam (see sendAttemptProgressBeacon
+// in src/features/exam-engine/attempt-client.ts).
 //
-// sendBeacon sends the session cookies for same-origin requests,
-// so the student is identified from their session — never from the request body.
+// It saves the progress of the open attempt: time, position, questions seen and
+// flagged. Answers are not sent here: each one is saved the moment it is picked.
+//
+// sendBeacon sends the session cookies for same-origin requests, so the student
+// is identified from their session, never from the request body. The database
+// function only touches the student's own open attempt.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { isUuid } from '@/lib/uuid'
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const MAX_BODY_BYTES = 200_000
+const MAX_IDS = 1000
 
 interface ProgressPayload {
-  exam_id?: unknown
-  current_question?: unknown
-  answers_json?: unknown
-  flags_json?: unknown
+  attempt_id?: unknown
   elapsed_seconds?: unknown
+  current_index?: unknown
+  viewed_ids?: unknown
+  flagged_ids?: unknown
 }
 
 function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0
 }
 
-function isStringRecord(value: unknown): value is Record<string, string> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    Object.values(value).every(v => typeof v === 'string')
-  )
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every(v => typeof v === 'string')
+function isUuidList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length <= MAX_IDS && value.every(v => typeof v === 'string' && isUuid(v))
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const supabase = await createServerSupabaseClient()
-    const { data: { user } } = await supabase.auth.getUser()
-
-    if (!user) {
+    const { data: claimsData } = await supabase.auth.getClaims()
+    if (!claimsData?.claims?.sub) {
       return NextResponse.json({ error: 'Not signed in' }, { status: 401 })
     }
 
@@ -52,40 +48,32 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     const body = JSON.parse(rawBody) as ProgressPayload
-
-    const examId = body.exam_id
-    const currentQuestion = body.current_question ?? 0
-    const answers = body.answers_json ?? {}
-    const flags = body.flags_json ?? []
+    const attemptId = body.attempt_id
     const elapsedSeconds = body.elapsed_seconds ?? 0
+    const currentIndex = body.current_index ?? 0
+    const viewedIds = body.viewed_ids ?? []
+    const flaggedIds = body.flagged_ids ?? []
 
     if (
-      typeof examId !== 'string' || !UUID_PATTERN.test(examId) ||
-      !isNonNegativeInteger(currentQuestion) ||
-      !isStringRecord(answers) ||
-      !isStringArray(flags) ||
-      !isNonNegativeInteger(elapsedSeconds)
+      typeof attemptId !== 'string' || !isUuid(attemptId) ||
+      !isNonNegativeInteger(elapsedSeconds) ||
+      !isNonNegativeInteger(currentIndex) ||
+      !isUuidList(viewedIds) ||
+      !isUuidList(flaggedIds)
     ) {
       return NextResponse.json({ error: 'Invalid progress data' }, { status: 400 })
     }
 
-    // Row Level Security guarantees a student can only write their own row
-    const { error } = await supabase.from('study_progress').upsert(
-      {
-        user_id: user.id,
-        exam_id: examId,
-        current_question: currentQuestion,
-        answers_json: answers,
-        flags_json: flags,
-        elapsed_seconds: elapsedSeconds,
-        completed: false,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'user_id,exam_id' }
-    )
+    const { error } = await supabase.rpc('save_attempt_progress', {
+      p_attempt_id: attemptId,
+      p_time_seconds: elapsedSeconds,
+      p_current_index: currentIndex,
+      p_viewed_ids: viewedIds,
+      p_flagged_ids: flaggedIds,
+    })
 
     if (error) {
-      console.error('[save-progress] database error:', error)
+      console.error('[save-progress] database error:', error.message)
       return NextResponse.json({ error: 'Could not save progress' }, { status: 500 })
     }
 

@@ -7,7 +7,8 @@ import { ExplanationRenderer } from '@/components/exam/ExplanationRenderer'
 import {
   startAttempt,
   recordAnswer,
-  updateAttemptTime,
+  saveAttemptProgress,
+  sendAttemptProgressBeacon,
   finishAttempt,
   type ExamTarget,
   type AnswerPayload,
@@ -58,11 +59,14 @@ interface Exam {
   title: string
   question_count: number
 }
+/** The open attempt's progress, restored when the student presses "Continue". */
 interface SavedProgress {
-  current_question: number
-  answers_json: Record<string, string>
-  flags_json: string[]
-  elapsed_seconds: number | null
+  currentIndex: number
+  /** question id -> chosen answer (from the answer log) */
+  answers: Record<string, string>
+  flaggedIds: string[]
+  viewedIds: string[]
+  elapsedSeconds: number
 }
 interface Props {
   exam: Exam
@@ -72,6 +76,8 @@ interface Props {
   target: ExamTarget
   /** True when the student pressed "Continue" (reuse the open attempt). */
   resume: boolean
+  /** 'unanswered' = only the questions never answered before (part of the exam). */
+  questionSet?: 'all' | 'unanswered'
   subjectName?: string
   batchName?: string
 }
@@ -234,6 +240,7 @@ export default function InteractiveExam({
   savedProgress,
   target,
   resume,
+  questionSet = 'all',
   subjectName,
   batchName,
 }: Props) {
@@ -245,21 +252,22 @@ export default function InteractiveExam({
   const targetCustomExamId = target.customExamId
 
   // ── State initialised from savedProgress when resuming ────────────────────
+  const startIndex = Math.min(savedProgress?.currentIndex ?? 0, Math.max(questions.length - 1, 0))
   const [mode, setMode] = useState<Mode>('play')
-  const [current, setCurrent] = useState(savedProgress?.current_question ?? 0)
+  const [current, setCurrent] = useState(startIndex)
   const [answers, setAnswers] = useState<Record<string, string>>(
-    savedProgress?.answers_json ?? {}
+    savedProgress?.answers ?? {}
   )
   const [flagged, setFlagged] = useState<Record<string, boolean>>(() => {
     const map: Record<string, boolean> = {}
-    for (const id of savedProgress?.flags_json ?? []) map[id] = true
+    for (const id of savedProgress?.flaggedIds ?? []) map[id] = true
     return map
   })
   const [bookmarked, setBookmarked] = useState<Record<string, boolean>>({})
 
-  // Timer starts from saved elapsed time (elapsed_seconds stores elapsed seconds)
+  // Timer starts from the time already saved on the attempt
   const [secondsElapsed, setSecondsElapsed] = useState(
-    savedProgress?.elapsed_seconds ?? 0
+    savedProgress?.elapsedSeconds ?? 0
   )
 
   const [navOpen, setNavOpen] = useState(false)
@@ -281,12 +289,17 @@ export default function InteractiveExam({
   const [finalTimeTaken, setFinalTimeTaken] = useState(0)
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState(false)
+  // Questions seen in this attempt, frozen when Finish is pressed (result counts)
+  const [finalViewed, setFinalViewed] = useState<Set<string>>(() => new Set())
+  // Questions of this exam never answered in any attempt (from the database after
+  // Finish; null for guests, custom exams, or until the result is saved)
+  const [examUnanswered, setExamUnanswered] = useState<number | null>(null)
 
   // Refs — used inside callbacks to avoid stale closures
-  const secondsRef = useRef(savedProgress?.elapsed_seconds ?? 0)
-  const answersRef = useRef(savedProgress?.answers_json ?? {})
+  const secondsRef = useRef(savedProgress?.elapsedSeconds ?? 0)
+  const answersRef = useRef(savedProgress?.answers ?? {})
   const flaggedRef = useRef<Record<string, boolean>>({})
-  const currentRef = useRef(savedProgress?.current_question ?? 0)
+  const currentRef = useRef(startIndex)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const autoSaveRef = useRef<NodeJS.Timeout | null>(null)
   const modeRef = useRef<Mode>('play')
@@ -295,12 +308,16 @@ export default function InteractiveExam({
   const userIdRef = useRef<string | null>(null)
   // Seconds spent on each question before it was answered (visible tab only)
   const questionTimeRef = useRef<Record<string, number>>({})
-  // Questions shown on screen in this attempt ("skipped" vs "not reached")
-  const viewedRef = useRef<Set<string>>(new Set())
+  // Questions shown on screen in this attempt ("skipped" vs "not seen").
+  // Restored on "Continue" and saved with the auto-save.
+  const viewedRef = useRef<Set<string>>(new Set(savedProgress?.viewedIds ?? []))
   // The attempt session, opened once when the exam loads
   const sessionPromiseRef = useRef<Promise<ExamSession> | null>(null)
+  // Open attempt id, readable synchronously when the page is closing
+  const attemptIdRef = useRef<string | null>(null)
   const resumeRef = useRef(resume)
   const isCustomExam = targetCustomExamId !== null
+  const isUnansweredSet = questionSet === 'unanswered'
 
   // Keep refs in sync with state
   useEffect(() => { answersRef.current = answers }, [answers])
@@ -325,19 +342,17 @@ export default function InteractiveExam({
         userIdRef.current = user?.id ?? null
         if (!user) return { userId: null, attemptId: null }
 
-        // A fresh start replaces any older saved position for this exam
-        if (!shouldResume && targetExamId) {
-          await supabase
-            .from('study_progress')
-            .delete()
-            .eq('user_id', user.id)
-            .eq('exam_id', targetExamId)
-        }
+        // Nothing left to solve in "unanswered only" mode: no attempt is opened
+        if (isUnansweredSet && questions.length === 0) return { userId: user.id, attemptId: null }
 
+        // A fresh start closes any open attempt of this exam (its answers still count).
+        // In "unanswered only" mode the new attempt covers just these questions.
         const attemptId = await startAttempt(
           { examId: targetExamId, customExamId: targetCustomExamId },
-          shouldResume
+          shouldResume,
+          isUnansweredSet ? questions.map(q => q.id) : null
         )
+        attemptIdRef.current = attemptId
         return { userId: user.id, attemptId }
       })()
 
@@ -347,7 +362,7 @@ export default function InteractiveExam({
       sessionPromiseRef.current = promise
     }
     return sessionPromiseRef.current
-  }, [supabase, targetExamId, targetCustomExamId])
+  }, [supabase, targetExamId, targetCustomExamId, isUnansweredSet, questions])
 
   // Open the attempt as soon as the exam screen loads, then show saved bookmarks
   useEffect(() => {
@@ -439,9 +454,12 @@ export default function InteractiveExam({
   /** Starts a brand-new attempt (Restart / Retake). The old one is abandoned. */
   function startNewAttempt(): void {
     sessionPromiseRef.current = null
+    attemptIdRef.current = null
     resumeRef.current = false
     questionTimeRef.current = {}
     viewedRef.current = new Set()
+    setFinalViewed(new Set())
+    setExamUnanswered(null)
     ensureSession().catch(err => console.error('Could not start the attempt:', err))
   }
 
@@ -469,6 +487,8 @@ export default function InteractiveExam({
   }, [mode, questions])
 
   // ── Auto-save every 30 s (only during play, only for logged-in users) ─────
+  // Time, position, questions seen and flags are kept on the attempt itself.
+  // (Answers are saved one by one the moment they are picked.)
   const persistProgress = useCallback(async (): Promise<void> => {
     if (modeRef.current !== 'play') return
 
@@ -478,29 +498,15 @@ export default function InteractiveExam({
     } catch {
       return // the next auto-save tries again
     }
-    if (!session.userId) return
+    if (!session.attemptId) return
 
-    // Study time is stored on the attempt
-    if (session.attemptId) {
-      await updateAttemptTime(session.attemptId, secondsRef.current)
-    }
-
-    // Custom exams are not resumed from the prep page, so no position is kept
-    if (isCustomExam) return
-
-    await supabase.from('study_progress').upsert(
-      {
-        user_id: session.userId,
-        exam_id: exam.id,
-        current_question: currentRef.current,
-        answers_json: answersRef.current,
-        flags_json: Object.keys(flaggedRef.current).filter(id => flaggedRef.current[id]),
-        elapsed_seconds: secondsRef.current,
-        completed: false,
-      },
-      { onConflict: 'user_id,exam_id' }
-    )
-  }, [ensureSession, exam.id, isCustomExam, supabase])
+    await saveAttemptProgress(session.attemptId, {
+      elapsedSeconds: secondsRef.current,
+      currentIndex: currentRef.current,
+      viewedIds: Array.from(viewedRef.current),
+      flaggedIds: Object.keys(flaggedRef.current).filter(id => flaggedRef.current[id]),
+    })
+  }, [ensureSession])
 
   useEffect(() => {
     if (mode !== 'play') return
@@ -510,59 +516,37 @@ export default function InteractiveExam({
     }
   }, [persistProgress, mode])
 
-  // ── Save on browser close / tab close / refresh ───────────────────────────
-  // beforeunload fires synchronously — we cannot await inside it.
-  // We use sendBeacon (fire-and-forget) so the POST completes after the page unloads.
-  // The beacon carries the session cookies; the server identifies the student from them.
-  // Answers themselves are already saved one by one, this only keeps the position.
+  // ── Save on browser close / tab close / refresh / browser Back ─────────────
+  // These events fire synchronously, so nothing can be awaited inside them.
+  // sendBeacon (fire-and-forget) completes even after the page unloads; it
+  // carries the session cookies, so the server identifies the student from them.
+  // Answers themselves are already saved one by one; this keeps the progress.
   useEffect(() => {
-    function handleBeforeUnload() {
-      // Only save if we are still in play mode (not after finish)
+    function saveOnLeave(): void {
+      // Only while solving (not after finish), and only with an open attempt
       if (modeRef.current !== 'play') return
-      if (!userIdRef.current || isCustomExam) return
-
-      const payload = JSON.stringify({
-        exam_id: exam.id,
-        current_question: currentRef.current,
-        answers_json: answersRef.current,
-        flags_json: Object.keys(flaggedRef.current).filter(id => flaggedRef.current[id]),
-        elapsed_seconds: secondsRef.current,
-        completed: false,
+      const attemptId = attemptIdRef.current
+      if (!attemptId) return
+      sendAttemptProgressBeacon(attemptId, {
+        elapsedSeconds: secondsRef.current,
+        currentIndex: currentRef.current,
+        viewedIds: Array.from(viewedRef.current),
+        flaggedIds: Object.keys(flaggedRef.current).filter(id => flaggedRef.current[id]),
       })
-      navigator.sendBeacon('/api/save-progress', new Blob([payload], { type: 'application/json' }))
     }
 
-    window.addEventListener('beforeunload', handleBeforeUnload)
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [exam.id, isCustomExam])
-
-  // ── Save on browser Back button ───────────────────────────────────────────
-  // popstate fires when the user presses the browser Back/Forward button.
-  // We use sendBeacon here too (same reason as beforeunload — navigation is happening).
-  useEffect(() => {
-    function handlePopState() {
-      if (modeRef.current !== 'play') return
-      if (!userIdRef.current || isCustomExam) return
-
-      const payload = JSON.stringify({
-        exam_id: exam.id,
-        current_question: currentRef.current,
-        answers_json: answersRef.current,
-        flags_json: Object.keys(flaggedRef.current).filter(id => flaggedRef.current[id]),
-        elapsed_seconds: secondsRef.current,
-        completed: false,
-      })
-      navigator.sendBeacon('/api/save-progress', new Blob([payload], { type: 'application/json' }))
+    window.addEventListener('beforeunload', saveOnLeave)
+    window.addEventListener('popstate', saveOnLeave)
+    return () => {
+      window.removeEventListener('beforeunload', saveOnLeave)
+      window.removeEventListener('popstate', saveOnLeave)
     }
-
-    window.addEventListener('popstate', handlePopState)
-    return () => window.removeEventListener('popstate', handlePopState)
-  }, [exam.id, isCustomExam])
+  }, [])
 
   // ── "Continue Later" ──────────────────────────────────────────────────────
   /**
-   * Saves the full current state to study_progress, then navigates back.
-   * The prep page (force-dynamic) will re-fetch and find the row → show Continue.
+   * Saves the current progress on the attempt, then navigates back.
+   * The prep page (not cached) finds the open attempt and shows Continue.
    */
   async function saveProgressAndExit(): Promise<void> {
     // Save the latest time and position while still in play mode
@@ -607,7 +591,9 @@ export default function InteractiveExam({
         wasViewed: viewedRef.current.has(q.id),
       }))
 
-      await finishAttempt(session.attemptId, payload, totalSeconds)
+      const summary = await finishAttempt(session.attemptId, payload, totalSeconds)
+      // Custom exams have no "unanswered questions" button (null)
+      setExamUnanswered(isCustomExam ? null : summary.examUnanswered)
 
       // Study tips are refreshed for regular exams (never blocks the result)
       void refreshTipSafely()
@@ -626,6 +612,7 @@ export default function InteractiveExam({
 
     const elapsed = secondsRef.current
     setFinalTimeTaken(elapsed)
+    setFinalViewed(new Set(viewedRef.current))
     setMode('result')
     setNavOpen(false)
 
@@ -693,7 +680,8 @@ export default function InteractiveExam({
   const mm = Math.floor(secondsElapsed / 60)
   const ss = secondsElapsed % 60
   const timerLabel = `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
-  const suggestedSeconds = exam.question_count * 60
+  // One minute per question shown (in "unanswered only" mode, fewer questions)
+  const suggestedSeconds = questions.length * 60
   const timerLow = secondsElapsed > suggestedSeconds
   const progressPct =
     ((current + (selectedKey ? 1 : 0)) / questions.length) * 100
@@ -704,8 +692,11 @@ export default function InteractiveExam({
     if (answers[q.id] === q.correct_answer) correctCount++
   })
   const wrongCount = answeredCount - correctCount
-  const skippedCount = questions.length - answeredCount
-  const scorePercent = Math.round((correctCount / questions.length) * 100)
+  // Unanswered questions: "skipped" if they were shown on screen, otherwise "not seen"
+  const unansweredQuestions = questions.filter(q => !answers[q.id])
+  const skippedCount = unansweredQuestions.filter(q => finalViewed.has(q.id)).length
+  const notSeenCount = unansweredQuestions.length - skippedCount
+  const scorePercent = questions.length > 0 ? Math.round((correctCount / questions.length) * 100) : 0
   const timeTakenLabel = `${Math.floor(finalTimeTaken / 60)}:${String(finalTimeTaken % 60).padStart(2, '0')}`
   const gaugeColor =
     scorePercent >= 80
@@ -781,7 +772,7 @@ export default function InteractiveExam({
   // ── Sticky header (shared across all modes) ───────────────────────────────
   const eyebrow =
     mode === 'play'
-      ? 'Interactive Exam'
+      ? (isUnansweredSet ? 'Unanswered Questions' : 'Interactive Exam')
       : mode === 'review'
       ? 'Review Mode'
       : 'Results'
@@ -961,6 +952,63 @@ export default function InteractiveExam({
       )}
     </header>
   )
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // NOTHING LEFT ("unanswered only" mode when every question is answered)
+  // ══════════════════════════════════════════════════════════════════════════
+  if (isUnansweredSet && questions.length === 0) {
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          background: 'var(--bg)',
+          color: 'var(--fg)',
+          fontFamily: "'Plus Jakarta Sans',system-ui,sans-serif",
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '40px 20px',
+        }}
+      >
+        <style>{sharedCSS}</style>
+        <div
+          className="a-pop"
+          style={{
+            width: 'min(460px, 100%)',
+            background: 'var(--bg-elev)',
+            border: '1px solid var(--bd)',
+            borderRadius: 20,
+            padding: '32px 28px',
+            textAlign: 'center',
+            boxShadow: '0 1px 3px var(--shadow)',
+          }}
+        >
+          <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 10 }}>
+            All questions answered
+          </div>
+          <div style={{ fontSize: 14, color: 'var(--fg-muted)', fontWeight: 600, lineHeight: 1.6, marginBottom: 24 }}>
+            You have answered every question in this exam at least once. Retake the full exam or review your answers from the exam page.
+          </div>
+          <button
+            className="press"
+            style={{
+              padding: '12px 22px',
+              borderRadius: 12,
+              border: 'none',
+              background: 'var(--primary)',
+              color: 'white',
+              fontWeight: 700,
+              fontSize: 14,
+              cursor: 'pointer',
+            }}
+            onClick={() => window.location.replace(prepPath)}
+          >
+            Back to Exam
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   // PLAY MODE
@@ -2095,7 +2143,7 @@ export default function InteractiveExam({
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(4,1fr)',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
                 gap: 12,
                 width: '100%',
                 marginTop: 8,
@@ -2104,9 +2152,10 @@ export default function InteractiveExam({
               {[
                 { label: 'Correct', value: correctCount, color: 'var(--accent-green)', bg: 'color-mix(in srgb, var(--accent-green) 14%, var(--bg-soft))' },
                 { label: 'Wrong',   value: wrongCount,   color: 'var(--primary)',       bg: 'color-mix(in srgb, var(--primary) 14%, var(--bg-soft))' },
-                { label: 'Skipped', value: skippedCount, color: 'var(--fg-muted)',      bg: 'var(--bg-soft)' },
+                { label: 'Skipped',  value: skippedCount, color: 'var(--fg-muted)',     bg: 'var(--bg-soft)' },
+                { label: 'Not seen', value: notSeenCount, color: 'var(--fg-muted)',     bg: 'var(--bg-soft)' },
                 {
-                  label: `Time (${exam.question_count} min suggested)`,
+                  label: `Time (${questions.length} min suggested)`,
                   value: timeTakenLabel,
                   color: finalTimeTaken <= suggestedSeconds ? 'var(--accent-green)' : 'var(--primary)',
                   bg: finalTimeTaken <= suggestedSeconds
@@ -2291,6 +2340,26 @@ export default function InteractiveExam({
             >
               Retake
             </button>
+            {examUnanswered !== null && examUnanswered > 0 && (
+              <button
+                style={{
+                  flex: '1 1 160px',
+                  padding: 13,
+                  borderRadius: 12,
+                  border: '1px solid color-mix(in srgb, var(--accent-blue) 45%, var(--bd))',
+                  background: 'color-mix(in srgb, var(--accent-blue) 12%, var(--bg-soft))',
+                  color: 'var(--accent-blue)',
+                  fontWeight: 700,
+                  fontSize: 14,
+                  cursor: 'pointer',
+                }}
+                className="press a-rise"
+                title="Questions of this exam you have never answered (skipped or not seen yet)"
+                onClick={() => window.location.replace(`${prepPath}/play?set=unanswered`)}
+              >
+                Solve Unanswered ({examUnanswered})
+              </button>
+            )}
             <button
               style={{
                 flex: '1 1 160px',

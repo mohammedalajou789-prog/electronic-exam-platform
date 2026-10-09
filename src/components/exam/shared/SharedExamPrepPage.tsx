@@ -1,14 +1,15 @@
 ﻿// src/components/exam/shared/SharedExamPrepPage.tsx
 //
-// Exam preparation page. It is NOT cached: logged-in students see their own saved progress
-// (the "Continue" box). To keep it fast, everything it needs is fetched in parallel.
+// Exam preparation page. It is NOT cached: logged-in students see their own progress
+// (the "Continue" box for an open attempt, and how many questions of this exam they
+// have solved, skipped or not solved yet). Everything is fetched in parallel.
 
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import {
   Clock, Play, Eye, Download,
-  RotateCcw, ArrowRight, ChevronRight, Check,
+  RotateCcw, ArrowRight, ChevronRight, Check, CircleDashed,
 } from 'lucide-react'
 
 interface Breadcrumb {
@@ -16,11 +17,36 @@ interface Breadcrumb {
   href?: string
 }
 
-/** The part of study_progress this page shows in the "Continue" box */
+/** The open attempt, shown in the "Continue" box */
 interface SavedProgress {
-  current_question: number | null
-  answers_json: Record<string, string> | null
-  elapsed_seconds: number | null
+  answeredCount: number
+  /** Questions in the attempt (fewer than the exam in "unanswered only" mode) */
+  totalQuestions: number
+  currentIndex: number
+  elapsedSeconds: number
+  isPart: boolean
+}
+
+/** The student's state for every question of this exam (get_my_exam_progress) */
+interface ExamProgress {
+  total: number
+  solved: number
+  skipped: number
+  unsolved: number
+}
+
+/** Row shape of the open attempt query below */
+interface OpenAttemptRow {
+  current_index: number
+  time_spent: number
+  total_questions: number
+  question_ids: string[] | null
+  attempt_answers: { question_id: string }[] | null
+}
+
+interface StudentData {
+  savedProgress: SavedProgress | null
+  examProgress: ExamProgress | null
 }
 
 type ServerSupabaseClient = Awaited<ReturnType<typeof createServerSupabaseClient>>
@@ -205,6 +231,13 @@ const PREP_CSS = `
   .pp-note { display: flex; align-items: flex-start; justify-content: center; gap: 6px; text-align: center; font-size: 11.5px; line-height: 1.45; font-weight: 600; color: var(--fg-faint); }
   .pp-note svg { flex-shrink: 0; margin-top: 1px; }
 
+  /* Solved / skipped / unsolved split of this exam */
+  .pp-split { display: flex; height: 8px; border-radius: 999px; background: var(--track); overflow: hidden; }
+  .pp-split i { display: block; height: 100%; }
+  .pp-seg-solved  { background: var(--clr-primary); }
+  .pp-seg-skipped { background: var(--tone-amber-fg); }
+  .pp-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--track); }
+
   .pp-modes-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .pp-mode {
     display: flex; align-items: center; gap: 14px; padding: 18px 20px; border-radius: 18px;
@@ -246,32 +279,52 @@ const PREP_CSS = `
 `
 
 /**
- * Returns the logged-in student's unfinished attempt at this exam, or null
- * (guest, no attempt yet, or an attempt with no answers).
+ * The logged-in student's data for this exam (both null for guests):
+ *   - savedProgress: the open attempt, if it has at least one answer
+ *   - examProgress:  solved / skipped / unsolved counts for the whole exam
  *
  * getClaims() checks the session locally with the project's public signing key,
  * so it does not need a network call to Supabase Auth (unlike getUser()).
  */
-async function loadSavedProgress(
+async function loadStudentData(
   supabase: ServerSupabaseClient,
   examId: string
-): Promise<SavedProgress | null> {
+): Promise<StudentData> {
   const { data: claimsData } = await supabase.auth.getClaims()
   const userId = typeof claimsData?.claims?.sub === 'string' ? claimsData.claims.sub : null
-  if (!userId) return null
+  if (!userId) return { savedProgress: null, examProgress: null }
 
-  const { data: progress } = await supabase
-    .from('study_progress')
-    .select('current_question, answers_json, elapsed_seconds')
-    .eq('user_id', userId)
-    .eq('exam_id', examId)
-    .eq('completed', false)
-    .maybeSingle()
+  const [attemptRes, progressRes] = await Promise.all([
+    supabase
+      .from('exam_attempts')
+      .select('current_index, time_spent, total_questions, question_ids, attempt_answers(question_id)')
+      .eq('user_id', userId)
+      .eq('exam_id', examId)
+      .eq('status', 'in_progress')
+      .not('attempt_answers.chosen_answer', 'is', null)
+      .maybeSingle(),
+    supabase.rpc('get_my_exam_progress', { p_exam_id: examId }),
+  ])
 
-  if (progress && Object.keys(progress.answers_json || {}).length > 0) {
-    return progress as SavedProgress
+  if (attemptRes.error) console.error('[SharedExamPrepPage] Open attempt query failed:', attemptRes.error.message)
+  if (progressRes.error) console.error('[SharedExamPrepPage] Exam progress query failed:', progressRes.error.message)
+
+  const attempt = attemptRes.data as unknown as OpenAttemptRow | null
+  const answeredCount = attempt?.attempt_answers?.length ?? 0
+
+  return {
+    // An attempt that was opened but never answered is not worth continuing
+    savedProgress: attempt && answeredCount > 0
+      ? {
+          answeredCount,
+          totalQuestions: attempt.total_questions,
+          currentIndex: attempt.current_index ?? 0,
+          elapsedSeconds: attempt.time_spent ?? 0,
+          isPart: attempt.question_ids !== null,
+        }
+      : null,
+    examProgress: (progressRes.data as ExamProgress | null) ?? null,
   }
-  return null
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
@@ -292,11 +345,12 @@ export default async function SharedExamPrepPage({
   let doctors: string[] = []
   let chapters: string[] = []
   let savedProgress: SavedProgress | null = null
+  let examProgress: ExamProgress | null = null
 
   if (examId) {
     // These three don't depend on each other, so they run at the same time:
     // one round trip to Supabase instead of three or four in a row.
-    const [examRes, chaptersRes, progressRes] = await Promise.all([
+    const [examRes, chaptersRes, studentData] = await Promise.all([
       supabase
         .from('exams')
         .select('*, exam_doctors(doctor:doctors(name))')
@@ -309,7 +363,7 @@ export default async function SharedExamPrepPage({
         .select('chapter:chapters(id, name)')
         .eq('exam_id', examId)
         .not('chapter_id', 'is', null),
-      loadSavedProgress(supabase, examId),
+      loadStudentData(supabase, examId),
     ])
 
     const { data: exam, error: examError } = examRes
@@ -335,7 +389,8 @@ export default async function SharedExamPrepPage({
     })
     chapters = Array.from(chapterNames)
 
-    savedProgress = progressRes
+    savedProgress = studentData.savedProgress
+    examProgress = studentData.examProgress
 
   } else if (customExamId) {
     const { data: customExam } = await supabase
@@ -366,16 +421,23 @@ export default async function SharedExamPrepPage({
 
   // ── Derived values ─────────────────────────────────────────
   const isCustom = !examId && !!customExamId
-  const answeredCount = savedProgress
-    ? Object.keys(savedProgress.answers_json || {}).length
+  const answeredCount = savedProgress?.answeredCount ?? 0
+  const attemptTotal = savedProgress?.totalQuestions ?? questionCount
+  const progressPct = attemptTotal > 0
+    ? Math.min(100, Math.round((answeredCount / attemptTotal) * 100))
     : 0
-  const progressPct = questionCount > 0
-    ? Math.min(100, Math.round((answeredCount / questionCount) * 100))
-    : 0
-  const nextQuestion = savedProgress ? (savedProgress.current_question ?? 0) + 1 : 1
-  const elapsedLabel = savedProgress?.elapsed_seconds
-    ? formatElapsed(savedProgress.elapsed_seconds)
+  const nextQuestion = savedProgress ? savedProgress.currentIndex + 1 : 1
+  const elapsedLabel = savedProgress?.elapsedSeconds
+    ? formatElapsed(savedProgress.elapsedSeconds)
     : null
+
+  // Solved / skipped / unsolved split (shown once the student has started this exam)
+  const hasHistory = !!examProgress && examProgress.total > 0 && examProgress.solved + examProgress.skipped > 0
+  const unansweredCount = examProgress ? examProgress.skipped + examProgress.unsolved : 0
+  const splitPct = (n: number): number =>
+    examProgress && examProgress.total > 0 ? (n / examProgress.total) * 100 : 0
+  // Offered only when it differs from starting the whole exam
+  const showUnansweredButton = !!examProgress && examProgress.solved > 0 && unansweredCount > 0
 
   const badgeLabel = isCustom
     ? 'Custom exam'
@@ -527,7 +589,10 @@ export default async function SharedExamPrepPage({
             {savedProgress && (
               <div className="pp-progress">
                 <div className="pp-progress-row">
-                  <span><b>{answeredCount}</b> of {questionCount} answered</span>
+                  <span>
+                    <b>{answeredCount}</b> of {attemptTotal} answered
+                    {savedProgress.isPart ? ' (unanswered questions)' : ''}
+                  </span>
                   <span className="pp-mono" style={{ color: 'var(--clr-primary)' }}>{progressPct}%</span>
                 </div>
                 <div className="pp-track">
@@ -536,6 +601,23 @@ export default async function SharedExamPrepPage({
                 <div className="pp-progress-meta">
                   <span><ArrowRight size={13} />Next: question {nextQuestion}</span>
                   {elapsedLabel && <span><Clock size={13} /><span className="pp-mono">{elapsedLabel}</span> spent</span>}
+                </div>
+              </div>
+            )}
+
+            {hasHistory && examProgress && (
+              <div className="pp-progress">
+                <div className="pp-progress-row">
+                  <span><b>{examProgress.solved}</b> of {examProgress.total} solved in this exam</span>
+                </div>
+                <div className="pp-split" aria-hidden="true">
+                  <i className="pp-seg-solved a-grow" style={{ width: `${splitPct(examProgress.solved)}%` }} />
+                  <i className="pp-seg-skipped a-grow" style={{ width: `${splitPct(examProgress.skipped)}%` }} />
+                </div>
+                <div className="pp-progress-meta">
+                  <span><i className="pp-dot pp-seg-solved" />{examProgress.solved} solved</span>
+                  <span><i className="pp-dot pp-seg-skipped" />{examProgress.skipped} skipped</span>
+                  <span><i className="pp-dot" />{examProgress.unsolved} not solved yet</span>
                 </div>
               </div>
             )}
@@ -554,6 +636,15 @@ export default async function SharedExamPrepPage({
             ) : (
               <Link href={`${basePath}/play`} className="pp-btn pp-btn-solid press a-pulse">
                 <Play size={14} fill="currentColor" />Start exam
+              </Link>
+            )}
+            {showUnansweredButton && (
+              <Link
+                href={`${basePath}/play?set=unanswered`}
+                className="pp-btn pp-btn-ghost press"
+                title="Only the questions of this exam you have never answered (skipped or not seen yet)"
+              >
+                <CircleDashed size={15} />Solve unanswered ({unansweredCount})
               </Link>
             )}
             {!isCustom && (

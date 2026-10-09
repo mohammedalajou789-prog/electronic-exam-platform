@@ -1,10 +1,13 @@
 // src/features/exam-engine/attempt-client.ts
 //
 // The only place where the exam screen talks to the attempt functions
-// in the database (start, record answer, update time, finish, abandon).
+// in the database (start, record answer, save progress, finish, abandon).
 //
 // All grading happens in the database. The browser only sends what the
 // student chose; it never decides whether an answer is correct.
+//
+// The attempt itself keeps the student's progress (time, position, questions
+// seen and flagged), so "Continue" restores exactly what the database holds.
 
 import { createClient } from '@/lib/supabase/client'
 
@@ -26,14 +29,28 @@ export interface AnswerPayload {
   wasViewed: boolean
 }
 
+/** Progress of an open attempt, saved every 30 seconds and when leaving. */
+export interface AttemptProgress {
+  elapsedSeconds: number
+  currentIndex: number
+  /** Questions shown on screen (they become "skipped" if unanswered on Finish). */
+  viewedIds: string[]
+  flaggedIds: string[]
+}
+
 export interface AttemptSummary {
   attemptId: string
   total: number
   correct: number
   incorrect: number
+  /** Seen but not answered. */
   skipped: number
+  /** Never shown on screen. */
+  notSeen: number
   percentage: number
   timeSpentSeconds: number
+  /** Questions of this exam never answered in any attempt (null for custom exams). */
+  examUnanswered: number | null
 }
 
 /** Shape of the JSON returned by finish_exam_attempt. */
@@ -43,8 +60,10 @@ interface FinishResponse {
   correct: number
   incorrect: number
   skipped: number
+  not_seen: number
   percentage: number
   time_spent: number
+  exam_unanswered: number | null
 }
 
 // ── Retry helper ──────────────────────────────────────────────────────────────
@@ -82,14 +101,21 @@ function toSeconds(value: number): number {
  * Opens an attempt when the exam screen loads.
  * Returns the attempt id, or null for guests (they have no personal history).
  * When `resume` is true, the student's open attempt for this exam is reused.
+ * `questionIds` limits a new attempt to part of a regular exam
+ * (e.g. the unanswered questions only); null means the whole exam.
  */
-export async function startAttempt(target: ExamTarget, resume: boolean): Promise<string | null> {
+export async function startAttempt(
+  target: ExamTarget,
+  resume: boolean,
+  questionIds: string[] | null = null
+): Promise<string | null> {
   const supabase = createClient()
   return withRetry(async () => {
     const { data, error } = await supabase.rpc('start_exam_attempt', {
       p_exam_id: target.examId,
       p_custom_exam_id: target.customExamId,
       p_resume: resume,
+      p_question_ids: questionIds,
     })
     if (error) throw new Error(error.message)
     return (data as string | null) ?? null
@@ -126,16 +152,37 @@ export async function recordAnswer(
 }
 
 /**
- * Updates the study time of an open attempt (called with the auto-save).
- * Failures are ignored: the next call sends the newer, larger value anyway.
+ * Saves the progress of an open attempt (called by the auto-save).
+ * Time only moves forward and "viewed" only grows, so a late or repeated
+ * call can never undo newer progress. Failures are ignored: the next call
+ * sends the newer values anyway.
  */
-export async function updateAttemptTime(attemptId: string, elapsedSeconds: number): Promise<void> {
+export async function saveAttemptProgress(attemptId: string, progress: AttemptProgress): Promise<void> {
   const supabase = createClient()
-  const { error } = await supabase.rpc('update_attempt_time', {
+  const { error } = await supabase.rpc('save_attempt_progress', {
     p_attempt_id: attemptId,
-    p_time_seconds: toSeconds(elapsedSeconds),
+    p_time_seconds: toSeconds(progress.elapsedSeconds),
+    p_current_index: Math.max(0, Math.round(progress.currentIndex)),
+    p_viewed_ids: progress.viewedIds,
+    p_flagged_ids: progress.flaggedIds,
   })
-  if (error) console.error('updateAttemptTime failed:', error.message)
+  if (error) console.error('saveAttemptProgress failed:', error.message)
+}
+
+/**
+ * Same as saveAttemptProgress, but for the moment the page is closing
+ * (tab closed, refresh, browser Back). sendBeacon is delivered even after
+ * the page unloads; the server identifies the student from the session cookie.
+ */
+export function sendAttemptProgressBeacon(attemptId: string, progress: AttemptProgress): void {
+  const payload = JSON.stringify({
+    attempt_id: attemptId,
+    elapsed_seconds: toSeconds(progress.elapsedSeconds),
+    current_index: Math.max(0, Math.round(progress.currentIndex)),
+    viewed_ids: progress.viewedIds,
+    flagged_ids: progress.flaggedIds,
+  })
+  navigator.sendBeacon('/api/save-progress', new Blob([payload], { type: 'application/json' }))
 }
 
 /**
@@ -174,8 +221,10 @@ export async function finishAttempt(
     correct: result.correct,
     incorrect: result.incorrect,
     skipped: result.skipped,
+    notSeen: result.not_seen,
     percentage: result.percentage,
     timeSpentSeconds: result.time_spent,
+    examUnanswered: result.exam_unanswered ?? null,
   }
 }
 
