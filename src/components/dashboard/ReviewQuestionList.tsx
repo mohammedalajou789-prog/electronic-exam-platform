@@ -39,7 +39,7 @@ export interface ReviewQuestion {
 }
 
 export interface ReviewItem {
-  id: string               // row id in wrong_answers / bookmarks
+  id: string               // row id: the question id (wrong list) or the bookmark id
   question_id: string
   created_at: string
   question: ReviewQuestion | null

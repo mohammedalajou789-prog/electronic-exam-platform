@@ -1,22 +1,18 @@
 'use client'
 // src/components/dashboard/EndSessionButton.tsx
 //
-// Ends an unfinished exam from the dashboard:
-//   1. The open attempt is closed on the server ("abandoned").
-//      Answers the student already gave still count in their statistics.
-//   2. The saved position is removed, so the card disappears from the list.
+// Ends an unfinished exam from the dashboard: the open attempt is closed on the
+// server ("abandoned"), so its card disappears from the list. Answers the student
+// already gave still count, and questions seen without an answer stay "skipped".
 
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { abandonAttempt } from '@/features/exam-engine/attempt-client'
 
 interface Props {
-  progressId: string
   examId: string
-  userId: string
 }
 
-export default function EndSessionButton({ progressId, examId, userId }: Props) {
+export default function EndSessionButton({ examId }: Props) {
   const [loading, setLoading] = useState(false)
   const [confirm, setConfirm] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -26,14 +22,6 @@ export default function EndSessionButton({ progressId, examId, userId }: Props) 
     setFailed(false)
     try {
       await abandonAttempt({ examId, customExamId: null })
-
-      const supabase = createClient()
-      const { error } = await supabase
-        .from('study_progress')
-        .delete()
-        .eq('id', progressId)
-        .eq('user_id', userId)
-      if (error) throw new Error(error.message)
 
       // Reload the page so the card disappears
       window.location.reload()

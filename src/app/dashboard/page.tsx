@@ -8,28 +8,74 @@ import StatInfo from '@/components/dashboard/StatInfo'
 import AcademicYearsSection from '@/components/shared/AcademicYearsSection'
 import { dismissStudyTip } from '@/app/actions/dismiss-study-tip'
 
-// ── Statistics (computed live by the get_my_study_stats database function) ───
+// ── Statistics (computed live in the database from user_question_progress) ───
 
 interface SubjectStats {
+  subject_id: string
   subject: string
-  answered: number
+  /** Active questions of the subject */
+  total: number
+  solved: number
+  /** Solved questions whose FIRST answer was right */
   correct: number
+  skipped: number
+  unsolved: number
 }
 
 interface StudyStats {
   questions_solved: number
   first_attempt_correct: number
-  /** Seen in a finished exam, left unanswered, and never answered anywhere. */
+  /** Seen, left without an answer, and never answered anywhere. */
   skipped: number
   study_seconds: number
   completed_exams: number
   by_subject: SubjectStats[]
 }
 
+/** get_my_wrong_overview: the wrong-questions list, counted in the database */
+interface WrongOverview {
+  total: number
+  by_subject: { subject_id: string; subject: string; count: number }[]
+  by_chapter: {
+    chapter_id: string
+    chapter: string
+    subject_id: string
+    subject: string
+    count: number
+    lectures: { lecture_id: string; lecture: string; count: number }[]
+  }[]
+}
+
+/** An open (unfinished) attempt at a regular exam, for "Continue studying" */
+interface OpenAttemptRow {
+  id: string
+  exam_id: string
+  started_at: string
+  total_questions: number
+  attempt_answers: { question_id: string; answered_at: string }[] | null
+  exam: {
+    id: string
+    title: string
+    batch: { name: string } | null
+    subject: { name: string } | null
+  } | null
+}
+
+interface OpenAttempt {
+  id: string
+  examId: string
+  title: string
+  subjectName: string
+  batchName: string
+  answered: number
+  total: number
+  lastActivity: string
+}
+
 // Explanations shown when a student clicks the "?" next to each statistic
 const STAT_HELP = {
   accuracy:
-    'The share of questions you got right on your first try. Only your first answer to each question counts, so retaking an exam you have already seen will not inflate it. Skipped questions are shown separately: a question counts as skipped when you saw it in a finished exam and never answered it. It stops being skipped as soon as you answer it anywhere, for example in a retake or a custom exam. Questions you never reached are not counted.',
+    'The share of questions you got right on your first try. Only your first answer to each question counts, so retaking an exam you have already seen will not inflate it. Skipped questions are shown separately: a question counts as skipped when you saw it and left it without an answer. It stops being skipped as soon as you answer it anywhere, for example in a retake or a custom exam. Questions you never saw are not counted.',
   solved:
     'The number of different questions you have answered in interactive exams, including exams you did not finish. Answering the same question again does not add to this number.',
   time:
@@ -46,7 +92,7 @@ async function getDashboardData(userId: string) {
   const [
     { data: user },
     { data: statsRaw },
-    { data: progressRaw },
+    { data: attemptsRaw },
     { data: wrongRaw },
     { data: bookmarksRaw },
     { data: recentReports },
@@ -56,36 +102,25 @@ async function getDashboardData(userId: string) {
 
     supabase.rpc('get_my_study_stats'),
 
+    // Open attempts at regular exams, with the answers given so far
     supabase
-      .from('study_progress')
+      .from('exam_attempts')
       .select(`
-        id, current_question, updated_at, exam_id,
+        id, exam_id, started_at, total_questions,
+        attempt_answers(question_id, answered_at),
         exam:exams(
-          id, title, question_count,
+          id, title,
           batch:batches(name),
           subject:subjects(name)
         )
       `)
       .eq('user_id', userId)
-      .eq('completed', false)
-      .order('updated_at', { ascending: false }),
+      .eq('status', 'in_progress')
+      .not('exam_id', 'is', null)
+      .not('attempt_answers.chosen_answer', 'is', null),
 
-    supabase
-      .from('wrong_answers')
-      .select(`
-        id, question_id, exam_id,
-        question:questions(
-          question_text,
-          chapter:chapters(name),
-          lecture:lectures(name),
-          exam:exams(
-            title,
-            subject:subjects(name)
-          )
-        )
-      `)
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false }),
+    // Wrong-questions counts (by subject and chapter), computed in the database
+    supabase.rpc('get_my_wrong_overview'),
 
     supabase
       .from('bookmarks')
@@ -120,46 +155,53 @@ async function getDashboardData(userId: string) {
   ])
 
   const stats = (statsRaw as StudyStats | null) ?? null
+  const wrong = (wrongRaw as WrongOverview | null) ?? null
 
-  // ── Performance by subject (first-attempt accuracy, same rule as the ring) ─
+  // ── Exams in progress (only attempts with at least one answer) ────────────
+  const progress: OpenAttempt[] = ((attemptsRaw ?? []) as unknown as OpenAttemptRow[])
+    .filter(a => (a.attempt_answers?.length ?? 0) > 0)
+    .map(a => {
+      const answers = a.attempt_answers ?? []
+      const lastActivity = answers.reduce(
+        (latest, ans) => (ans.answered_at > latest ? ans.answered_at : latest),
+        a.started_at
+      )
+      return {
+        id: a.id,
+        examId: a.exam_id,
+        title: a.exam?.title ?? 'Exam',
+        subjectName: a.exam?.subject?.name ?? '',
+        batchName: a.exam?.batch?.name ?? '',
+        answered: answers.length,
+        total: a.total_questions,
+        lastActivity,
+      }
+    })
+    .sort((x, y) => (x.lastActivity < y.lastActivity ? 1 : -1))
+
+  // ── Progress by subject: solved / skipped / not solved + first-try accuracy ─
   const subjectChart = (stats?.by_subject ?? [])
     .map(s => ({
       name: s.subject,
-      pct: s.answered > 0 ? Math.round((s.correct / s.answered) * 100) : 0,
+      pct: s.solved > 0 ? Math.round((s.correct / s.solved) * 100) : 0,
+      total: s.total,
+      solved: s.solved,
+      skipped: s.skipped,
+      unsolved: s.unsolved,
     }))
     .sort((a, b) => b.pct - a.pct)
 
   // ── Wrong answers grouped by subject ──────────────────────────────────────
-  const wrongBySubject: Record<string, { subjectName: string; count: number }> = {}
-  for (const w of wrongRaw ?? []) {
-    const subj = (w.question as any)?.exam?.subject?.name ?? 'Other'
-    if (!wrongBySubject[subj]) wrongBySubject[subj] = { subjectName: subj, count: 0 }
-    wrongBySubject[subj].count++
-  }
+  const wrongBySubject = (wrong?.by_subject ?? []).map(s => ({ subjectName: s.subject, count: s.count }))
 
-  // ── Weakest chapter (focus area) ──────────────────────────────────────────
-  const chapterMap: Record<string, {
-    chapter: string
-    subject: string
-    lectures: Set<string>
-    count: number
-  }> = {}
-  for (const w of wrongRaw ?? []) {
-    const ch = (w.question as any)?.chapter?.name
-    const lec = (w.question as any)?.lecture?.name
-    const subj = (w.question as any)?.exam?.subject?.name ?? ''
-    if (!ch) continue
-    if (!chapterMap[ch]) chapterMap[ch] = { chapter: ch, subject: subj, lectures: new Set(), count: 0 }
-    chapterMap[ch].count++
-    if (lec) chapterMap[ch].lectures.add(lec)
-  }
-  const weakestRaw = Object.values(chapterMap).sort((a, b) => b.count - a.count)[0] ?? null
+  // ── Weakest chapter (focus area): the chapter with most wrong questions ───
+  const weakestRaw = wrong?.by_chapter?.[0] ?? null
   const weakestChapter = weakestRaw
     ? {
         chapter: weakestRaw.chapter,
         subject: weakestRaw.subject,
         count: weakestRaw.count,
-        lectures: Array.from(weakestRaw.lectures).slice(0, 3),
+        lectures: weakestRaw.lectures.slice(0, 3).map(l => l.lecture),
       }
     : null
 
@@ -174,10 +216,10 @@ async function getDashboardData(userId: string) {
   return {
     user,
     stats,
-    progress: progressRaw ?? [],
+    progress,
     subjectChart,
-    wrongBySubject: Object.values(wrongBySubject),
-    totalWrong: (wrongRaw ?? []).length,
+    wrongBySubject,
+    totalWrong: wrong?.total ?? 0,
     weakestChapter,
     bookmarksBySubject: Object.values(bookmarksBySubject),
     totalBookmarks: (bookmarksRaw ?? []).length,
@@ -274,7 +316,7 @@ export default async function DashboardPage() {
     : accuracy >= 70 ? 'Good standing' : accuracy >= 40 ? 'Keep pushing' : 'Needs work'
   const wrongRanked = withShare(wrongBySubject)
   const bookmarksRanked = withShare(bookmarksBySubject)
-  const resumeHref = progress.length > 0 ? `/dashboard/resume/${(progress[0] as any).exam_id}` : '#continue'
+  const resumeHref = progress.length > 0 ? `/dashboard/resume/${progress[0].examId}` : '#continue'
 
   return (
     <div className="dash-root">
@@ -528,22 +570,21 @@ export default async function DashboardPage() {
               <div className="dash-empty">No exams in progress. Pick a year below to start one.</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {progress.map((p: any) => {
-                  const exam = p.exam
-                  const subjectName = exam?.subject?.name ?? ''
-                  const batchName = exam?.batch?.name ?? ''
-                  const total = exam?.question_count ?? 0
-                  const done = p.current_question + 1
-                  const pct = total > 0 ? Math.round((done / total) * 100) : 0
+                {progress.map(p => {
+                  const subjectName = p.subjectName
+                  const batchName = p.batchName
+                  const total = p.total
+                  const done = p.answered
+                  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0
                   return (
                     <div key={p.id} className="dash-item" style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
                       <span style={{ width: 46, height: 46, flexShrink: 0, borderRadius: 12, background: 'var(--bg-elev)', border: '1px solid var(--bd)', color: 'var(--clr-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800 }}>
-                        {initialsOf(subjectName || exam?.title || '')}
+                        {initialsOf(subjectName || p.title)}
                       </span>
                       <div style={{ flexGrow: 1, minWidth: 180, display: 'flex', flexDirection: 'column', gap: 7 }}>
                         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
-                          <span style={{ fontSize: 14.5, fontWeight: 700 }}>{exam?.title ?? 'Exam'}</span>
-                          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-muted)', flexShrink: 0 }}>{timeAgo(p.updated_at)}</span>
+                          <span style={{ fontSize: 14.5, fontWeight: 700 }}>{p.title}</span>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-muted)', flexShrink: 0 }}>{timeAgo(p.lastActivity)}</span>
                         </div>
                         {(subjectName || batchName) && (
                           <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--fg-muted)' }}>
@@ -554,17 +595,17 @@ export default async function DashboardPage() {
                           <div className="dash-track" style={{ flexGrow: 1 }}>
                             <div className="dash-track-fill" style={{ width: `${pct}%`, background: 'var(--clr-primary)' }} />
                           </div>
-                          <span className="dash-mono" style={{ fontSize: 12, fontWeight: 600, color: 'var(--clr-primary)', flexShrink: 0 }}>
-                            Q{done} / {total || '?'}
+                          <span className="dash-mono" title="Questions answered in this attempt" style={{ fontSize: 12, fontWeight: 600, color: 'var(--clr-primary)', flexShrink: 0 }}>
+                            {done} / {total || '?'}
                           </span>
                         </div>
                       </div>
                       <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                        <Link href={`/dashboard/resume/${p.exam_id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '10px 16px', borderRadius: 10, background: 'var(--clr-primary)', color: '#fff', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
+                        <Link href={`/dashboard/resume/${p.examId}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '10px 16px', borderRadius: 10, background: 'var(--clr-primary)', color: '#fff', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
                           <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21" /></svg>
                           Continue
                         </Link>
-                        <EndSessionButton progressId={p.id} examId={p.exam_id} userId={user.id} />
+                        <EndSessionButton examId={p.examId} />
                       </div>
                     </div>
                   )
@@ -620,7 +661,7 @@ export default async function DashboardPage() {
         <div className="dash-row">
           <section className="dash-card">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22, gap: 14, flexWrap: 'wrap' }}>
-              <h2 className="dash-h2">Performance by subject</h2>
+              <h2 className="dash-h2">Progress by subject</h2>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: 12, fontWeight: 600, color: 'var(--fg-muted)' }}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--perf-high)' }} />70%+</span>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--perf-mid)' }} />40–69%</span>
@@ -634,14 +675,23 @@ export default async function DashboardPage() {
                 {subjectChart.map(s => {
                   const color = perfColor(s.pct)
                   return (
-                    <div key={s.name} style={{ display: 'grid', gridTemplateColumns: 'minmax(90px, 150px) minmax(0, 1fr) 56px', alignItems: 'center', gap: 16 }}>
-                      <span style={{ fontSize: 14, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
-                      <div style={{ position: 'relative', height: 12, borderRadius: 999, background: 'var(--track)', overflow: 'hidden' }}>
-                        <div style={{ position: 'absolute', top: 0, bottom: 0, left: '40%', width: 1, background: 'var(--bd)' }} />
-                        <div style={{ position: 'absolute', top: 0, bottom: 0, left: '70%', width: 1, background: 'var(--bd)' }} />
-                        <div style={{ position: 'relative', height: '100%', borderRadius: 999, width: `${s.pct}%`, background: color }} />
+                    <div key={s.name} style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(90px, 150px) minmax(0, 1fr) 56px', alignItems: 'center', gap: 16 }}>
+                        <span style={{ fontSize: 14, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+                        <div style={{ position: 'relative', height: 12, borderRadius: 999, background: 'var(--track)', overflow: 'hidden' }}>
+                          <div style={{ position: 'absolute', top: 0, bottom: 0, left: '40%', width: 1, background: 'var(--bd)' }} />
+                          <div style={{ position: 'absolute', top: 0, bottom: 0, left: '70%', width: 1, background: 'var(--bd)' }} />
+                          <div style={{ position: 'relative', height: '100%', borderRadius: 999, width: `${s.pct}%`, background: color }} />
+                        </div>
+                        <span className="dash-mono" title="First-try accuracy" style={{ fontSize: 13.5, fontWeight: 600, textAlign: 'right', color }}>{s.pct}%</span>
                       </div>
-                      <span className="dash-mono" style={{ fontSize: 13.5, fontWeight: 600, textAlign: 'right', color }}>{s.pct}%</span>
+                      {/* Solved / skipped / not solved yet, out of all questions of the subject */}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: 12, fontWeight: 600, color: 'var(--fg-muted)' }}>
+                        <span><b style={{ color: 'var(--fg)' }}>{s.solved.toLocaleString()}</b> solved</span>
+                        <span><b style={{ color: 'var(--fg)' }}>{s.skipped.toLocaleString()}</b> skipped</span>
+                        <span><b style={{ color: 'var(--fg)' }}>{s.unsolved.toLocaleString()}</b> not solved yet</span>
+                        <span>of {s.total.toLocaleString()} questions</span>
+                      </div>
                     </div>
                   )
                 })}

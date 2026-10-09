@@ -4,6 +4,26 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { ChevronRight, SlidersHorizontal, Target, CircleCheck } from 'lucide-react'
 import WrongQuestionsClient from '@/components/dashboard/WrongQuestionsClient'
+import type { ReviewItem, ReviewQuestion } from '@/components/dashboard/ReviewQuestionList'
+
+/** get_my_wrong_overview: counts of the wrong-questions list, computed in the database */
+interface WrongOverview {
+  total: number
+  by_subject: { subject_id: string; subject: string; count: number }[]
+  by_chapter: {
+    chapter_id: string
+    chapter: string
+    count: number
+    lectures: { lecture_id: string; lecture: string; count: number }[]
+  }[]
+}
+
+/** One row of the wrong-questions list query */
+interface WrongRow {
+  question_id: string
+  last_answered_at: string
+  question: ReviewQuestion | null
+}
 
 /** Stagger index for the shared animation classes in globals.css */
 const stagger = (i: number): React.CSSProperties =>
@@ -201,74 +221,66 @@ export default async function WrongQuestionsPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  // Fetch all wrong answers with full question data
-  const { data: wrongRaw } = await supabase
-    .from('wrong_answers')
+  const activeSubject = (await searchParams).subject ?? null
+
+  // The list and its counts don't depend on each other, so they load together.
+  // Everything is filtered and counted in the database (no 1000-row limit on counts).
+  let listQuery = supabase
+    .from('user_question_progress')
     .select(`
-      id, question_id, exam_id, created_at,
-      question:questions(
+      question_id, last_answered_at,
+      question:questions!inner(
         id, question_text, chapter_id, lecture_id, chapter:chapters(id, name), lecture:lectures(id, name),
         choice_a, choice_b, choice_c, choice_d, choice_e,
         correct_answer, explanation,
         incorrect_explanation_a, incorrect_explanation_b,
         incorrect_explanation_c, incorrect_explanation_d,
         incorrect_explanation_e,
-        exam:exams(
+        exam:exams!inner(
           id, title,
           batch:batches(name),
-          subject:subjects(name)
+          subject:subjects!inner(name)
         )
       )
     `)
     .eq('user_id', user.id)
-    .order('created_at', { ascending: false })
+    .eq('in_wrong_list', true)
+    .order('last_answered_at', { ascending: false })
 
-  const wrong = wrongRaw ?? []
-
-  // Extract unique subjects
-  const subjects = [...new Set(
-    wrong
-      .map((w: any) => w.question?.exam?.subject?.name)
-      .filter(Boolean)
-  )] as string[]
-
-  const activeSubject = (await searchParams).subject ?? null
-
-  // Filter by subject if provided
-  const filtered = activeSubject
-    ? wrong.filter((w: any) => w.question?.exam?.subject?.name === activeSubject)
-    : wrong
-
-  // Chapter stats for the tip
-  const chapterMap: Record<string, { count: number; lectures: Set<string> }> = {}
-  for (const w of wrong) {
-    const chObj = (w.question as any)?.chapter
-    const leObj = (w.question as any)?.lecture
-    const ch  = Array.isArray(chObj) ? chObj[0]?.name : chObj?.name
-    const lec = Array.isArray(leObj) ? leObj[0]?.name : leObj?.name
-    if (!ch) continue
-    if (!chapterMap[ch]) chapterMap[ch] = { count: 0, lectures: new Set() }
-    chapterMap[ch].count++
-    if (lec) chapterMap[ch].lectures.add(lec)
+  if (activeSubject) {
+    listQuery = listQuery.eq('question.exam.subject.name', activeSubject)
   }
-  const chapterStats = Object.entries(chapterMap)
-    .map(([chapter, v]) => ({
-      chapter,
-      count: v.count,
-      lectures: [...v.lectures],
-    }))
-    .sort((a, b) => b.count - a.count)
 
-  // ── Derived values for the layout ─────────────────────────
-  const subjectCounts = subjects
-    .map(subj => ({
-      name: subj,
-      count: wrong.filter((w: any) => w.question?.exam?.subject?.name === subj).length,
-    }))
-    .sort((a, b) => b.count - a.count)
+  const [listRes, overviewRes] = await Promise.all([
+    listQuery,
+    supabase.rpc('get_my_wrong_overview'),
+  ])
+
+  if (listRes.error) console.error('[wrong-questions] list query failed:', listRes.error.message)
+  if (overviewRes.error) console.error('[wrong-questions] overview query failed:', overviewRes.error.message)
+
+  const overview = (overviewRes.data as WrongOverview | null) ?? null
+  const totalWrong = overview?.total ?? 0
+
+  // Rows for the shared review list (the question id identifies the row)
+  const filtered: ReviewItem[] = ((listRes.data ?? []) as unknown as WrongRow[]).map(row => ({
+    id: row.question_id,
+    question_id: row.question_id,
+    created_at: row.last_answered_at,
+    question: row.question,
+  }))
+
+  // Subjects with wrong questions (most first) and weak chapters, from the database
+  const subjectCounts = (overview?.by_subject ?? []).map(s => ({ name: s.subject, count: s.count }))
+  const chapterStats = (overview?.by_chapter ?? []).map(c => ({
+    chapter: c.chapter,
+    count: c.count,
+    lectures: c.lectures.map(l => l.lecture),
+  }))
+
   const spec = [
-    { value: wrong.length.toLocaleString(), label: 'To review', text: false },
-    { value: String(subjects.length), label: subjects.length === 1 ? 'Subject' : 'Subjects', text: false },
+    { value: totalWrong.toLocaleString(), label: 'To review', text: false },
+    { value: String(subjectCounts.length), label: subjectCounts.length === 1 ? 'Subject' : 'Subjects', text: false },
     ...(chapterStats[0] ? [{ value: chapterStats[0].chapter, label: 'Weakest chapter', text: true }] : []),
   ]
   const basePath = '/dashboard/wrong-questions'
@@ -297,7 +309,7 @@ export default async function WrongQuestionsPage({
               </p>
             </div>
 
-            {wrong.length > 0 && (
+            {totalWrong > 0 && (
               <div className="rv-spec a-rise" style={stagger(2)}>
                 {spec.map(item => (
                   <div key={item.label} className="rv-spec-item">
@@ -315,7 +327,7 @@ export default async function WrongQuestionsPage({
         <div className="rv-col">
 
           {/* ── Subject filter ──────────────────────────────────── */}
-          {subjects.length > 0 && (
+          {subjectCounts.length > 0 && (
             <div className="rv-filter a-rise" style={stagger(2)}>
               <div className="rv-filter-head">
                 <span className="rv-filter-label"><SlidersHorizontal size={14} />Filter by subject</span>
@@ -329,7 +341,7 @@ export default async function WrongQuestionsPage({
                     aria-current={!activeSubject ? 'page' : undefined}
                   >
                     All subjects
-                    <span className="rv-tab-count">{wrong.length}</span>
+                    <span className="rv-tab-count">{totalWrong}</span>
                   </Link>
                   {subjectCounts.map((subj, i) => (
                     <Link
@@ -368,7 +380,7 @@ export default async function WrongQuestionsPage({
             </div>
           )}
 
-          {wrong.length > 0 && (
+          {totalWrong > 0 && (
             <div className="rv-result a-rise" style={stagger(3)}>
               <h2 className="rv-result-title">{activeSubject ?? 'All subjects'}</h2>
               <span className="rv-result-meta">
@@ -388,10 +400,7 @@ export default async function WrongQuestionsPage({
                 </p>
               </div>
             ) : (
-              <WrongQuestionsClient
-                questions={filtered as any}
-                userId={user.id}
-              />
+              <WrongQuestionsClient questions={filtered} />
             )}
           </div>
         </div>
