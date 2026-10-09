@@ -209,7 +209,7 @@ export default function SearchClient({
       minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)',
       fontFamily: '"Plus Jakarta Sans", system-ui, sans-serif',
     }}>
-      <main style={{ maxWidth: 900, margin: '0 auto', padding: '32px 24px 80px' }}>
+      <main style={{ maxWidth: 'var(--page-max)', margin: '0 auto', padding: '32px var(--page-pad) 80px' }}>
 
         {/* ── Title ── */}
         <h1 style={{ margin: '0 0 20px', fontSize: 22, fontWeight: 800 }}>Search Questions</h1>

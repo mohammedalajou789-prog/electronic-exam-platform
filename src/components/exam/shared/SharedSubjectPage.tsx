@@ -40,7 +40,7 @@ const stagger = (i: number): React.CSSProperties =>
 
 const SUBJECT_CSS = `
   .sp { background: var(--bg); color: var(--fg); font-family: "Plus Jakarta Sans", system-ui, sans-serif; }
-  .sp-wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+  .sp-wrap { max-width: var(--page-max); margin: 0 auto; padding: 0 var(--page-pad); }
 
   /* ── Cover ── */
   .sp-band { position: relative; overflow: hidden; background-color: var(--bg-elev); border-bottom: 1px solid var(--bd); padding: 22px 0 28px; }
@@ -85,7 +85,7 @@ const SUBJECT_CSS = `
   .sp-hint { font-size: 13px; font-weight: 600; color: var(--fg-muted); }
 
   /* Batches */
-  .sp-batches { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .sp-batches { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
   .sp-batch {
     display: flex; flex-direction: column; gap: 14px; padding: 18px;
     border-radius: 18px; background: var(--bg-elev); border: 1px solid var(--bd);
@@ -126,7 +126,7 @@ const SUBJECT_CSS = `
     .sp-cover { grid-template-columns: 1fr; gap: 22px; align-items: start; }
   }
   @media (max-width: 640px) {
-    .sp-wrap { padding: 0 16px; }
+    .sp-wrap { padding: 0 var(--page-pad); }
     .sp-band { padding: 18px 0 22px; }
     .sp-head { gap: 18px; }
     .sp-spec { display: grid; grid-template-columns: repeat(4, auto); justify-content: start; gap: 0; }

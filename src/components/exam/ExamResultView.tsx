@@ -24,7 +24,7 @@ const stagger = (i: number): React.CSSProperties =>
 
 const RESULTS_CSS = `
   .rs { min-height: 100vh; background: var(--bg); color: var(--fg); font-family: "Plus Jakarta Sans", system-ui, sans-serif; }
-  .rs-wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+  .rs-wrap { max-width: var(--page-max); margin: 0 auto; padding: 0 var(--page-pad); }
 
   /* Top bar */
   .rs-bar { position: sticky; top: 0; z-index: 40; background: color-mix(in srgb, var(--bg-elev) 88%, transparent); border-bottom: 1px solid var(--bd); backdrop-filter: blur(12px); }
@@ -123,7 +123,7 @@ const RESULTS_CSS = `
   .rs-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
   .rs-card-title { margin: 0; font-size: 19px; font-weight: 800; letter-spacing: -0.02em; }
   .rs-card-note { font-size: 12.5px; font-weight: 600; color: var(--fg-muted); }
-  .rs-chapters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 36px; }
+  .rs-chapters { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px 36px; }
   .rs-ch { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
   .rs-ch-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
   .rs-ch-name { font-size: 14px; font-weight: 700; line-height: 1.35; min-width: 0; overflow-wrap: anywhere; }
@@ -147,7 +147,7 @@ const RESULTS_CSS = `
     .rs-chapters { grid-template-columns: minmax(0, 1fr); }
   }
   @media (max-width: 560px) {
-    .rs-wrap { padding: 0 16px; }
+    .rs-wrap { padding: 0 var(--page-pad); }
     .rs-main { padding-top: 18px; padding-bottom: 56px; gap: 14px; }
     .rs-hero { padding: 24px 16px; border-radius: 24px; }
     .rs-gauge { width: 170px; height: 170px; }

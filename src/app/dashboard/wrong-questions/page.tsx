@@ -34,7 +34,7 @@ const TONES = ['var(--clr-primary)', 'var(--tone-blue-fg)', 'var(--tone-purple-f
 
 const REVIEW_CSS = `
   .rv { min-height: 100vh; background: var(--bg); color: var(--fg); font-family: "Plus Jakarta Sans", system-ui, sans-serif; }
-  .rv-wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+  .rv-wrap { max-width: var(--page-max); margin: 0 auto; padding: 0 var(--page-pad); }
 
   /* ── Cover ── */
   .rv-band { position: relative; overflow: hidden; background-color: var(--bg-elev); border-bottom: 1px solid var(--bd); padding: 22px 0 28px; }
@@ -181,7 +181,7 @@ const REVIEW_CSS = `
     .rv-cover { grid-template-columns: 1fr; gap: 22px; align-items: start; }
   }
   @media (max-width: 640px) {
-    .rv-wrap { padding: 0 16px; }
+    .rv-wrap { padding: 0 var(--page-pad); }
     .rv-band { padding: 18px 0 22px; }
     .rv-head { gap: 18px; }
     .rv-lead { font-size: 14px; }

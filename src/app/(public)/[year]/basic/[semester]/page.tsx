@@ -37,7 +37,7 @@ const TONES = [
 
 const SEMESTER_CSS = `
   .sm { min-height: 100vh; background: var(--bg); color: var(--fg); font-family: "Plus Jakarta Sans", system-ui, sans-serif; }
-  .sm-wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+  .sm-wrap { max-width: var(--page-max); margin: 0 auto; padding: 0 var(--page-pad); }
 
   /* ── Cover ── */
   .sm-band { position: relative; overflow: hidden; background-color: var(--bg-elev); border-bottom: 1px solid var(--bd); padding: 22px 0 28px; }
@@ -81,7 +81,7 @@ const SEMESTER_CSS = `
   .sm-h2 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.01em; }
   .sm-hint { font-size: 13px; font-weight: 600; color: var(--fg-muted); }
 
-  .sm-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+  .sm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; }
 
   .sm-card {
     position: relative; overflow: hidden; isolation: isolate;
@@ -157,7 +157,7 @@ const SEMESTER_CSS = `
     .sm-card { min-height: 0; }
   }
   @media (max-width: 640px) {
-    .sm-wrap { padding: 0 16px; }
+    .sm-wrap { padding: 0 var(--page-pad); }
     .sm-band { padding: 18px 0 22px; }
     .sm-head { gap: 18px; }
     .sm-lead { font-size: 14px; }

@@ -99,7 +99,7 @@ const stagger = (i: number): React.CSSProperties =>
 
 const PREP_CSS = `
   .pp { background: var(--bg); color: var(--fg); font-family: "Plus Jakarta Sans", system-ui, sans-serif; }
-  .pp-wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+  .pp-wrap { max-width: var(--page-max); margin: 0 auto; padding: 0 var(--page-pad); }
 
   /* ── Top: the exam "cover" ── */
   .pp-band {
@@ -168,7 +168,7 @@ const PREP_CSS = `
   .pp-syl-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
   .pp-syl-title { font-size: 15px; font-weight: 800; }
   .pp-syl-count { font-size: 12.5px; font-weight: 600; color: var(--fg-muted); }
-  .pp-syl-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 40px; }
+  .pp-syl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); column-gap: 40px; }
   .pp-syl-item { display: flex; align-items: baseline; gap: 14px; padding: 12px 0; border-top: 1px solid var(--bd); min-width: 0; }
   .pp-syl-num { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; font-weight: 600; color: var(--clr-primary); flex-shrink: 0; }
   .pp-syl-name { font-size: 14px; font-weight: 600; color: var(--fg); line-height: 1.4; }
@@ -261,7 +261,7 @@ const PREP_CSS = `
     .pp-hero-glow { right: -80px; }
   }
   @media (max-width: 640px) {
-    .pp-wrap { padding: 0 16px; }
+    .pp-wrap { padding: 0 var(--page-pad); }
     .pp-band { padding: 20px 0 24px; }
     .pp-head { gap: 20px; }
     .pp-spec { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 0; }

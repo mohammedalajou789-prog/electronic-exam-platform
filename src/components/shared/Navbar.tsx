@@ -252,7 +252,7 @@ export default function Navbar() {
 
       {/* Header */}
       <header style={{ position: 'sticky', top: 0, zIndex: 50, background: 'var(--bg-elev)', borderBottom: '1px solid var(--bd)', backdropFilter: 'blur(10px)' }}>
-        <div style={{ width: '100%', padding: '0 28px', height: 60, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ width: '100%', maxWidth: 'var(--page-max)', margin: '0 auto', padding: '0 var(--page-pad)', height: 60, display: 'flex', alignItems: 'center', gap: 12 }}>
 
           {/* Logo */}
           <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none', flexShrink: 0 }}>

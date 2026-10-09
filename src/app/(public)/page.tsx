@@ -28,7 +28,7 @@ const DEMO = {
 
 const HOME_CSS = `
   .hm { background: var(--bg); color: var(--fg); font-family: "Plus Jakarta Sans", system-ui, sans-serif; overflow-x: clip; }
-  .hm-wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px; }
+  .hm-wrap { max-width: var(--page-max); margin: 0 auto; padding: 0 var(--page-pad); }
   .hm-sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
   .hm-btn {

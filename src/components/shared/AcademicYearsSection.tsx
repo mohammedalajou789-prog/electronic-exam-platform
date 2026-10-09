@@ -71,12 +71,12 @@ export default async function AcademicYearsSection({
     <section id="years" className="ay-section">
       <style>{`
         .ay-section {
-          padding: 72px 40px;
+          padding: 72px var(--page-pad);
           background: var(--bg-elev);
           border-top: 1px solid var(--bd);
           font-family: "Plus Jakarta Sans", system-ui, sans-serif;
         }
-        .ay-inner { max-width: 1280px; margin: 0 auto; display: flex; flex-direction: column; gap: 36px; }
+        .ay-inner { max-width: var(--page-max); margin: 0 auto; display: flex; flex-direction: column; gap: 36px; }
         .ay-mono  { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
 
         /* ── Head ── */
@@ -139,7 +139,7 @@ export default async function AcademicYearsSection({
 
         /* ── Mobile ── */
         @media (max-width: 860px) {
-          .ay-section { padding: 36px 18px 40px; }
+          .ay-section { padding: 36px var(--page-pad) 40px; }
           .ay-inner   { gap: 26px; }
           .ay-title   { font-size: 26px; }
           .ay-sub     { font-size: 14px; }

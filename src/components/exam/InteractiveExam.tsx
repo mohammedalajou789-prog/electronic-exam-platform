@@ -796,9 +796,9 @@ export default function InteractiveExam({
     >
       <div
         style={{
-          maxWidth: 1280,
+          maxWidth: 'var(--page-max)',
           margin: '0 auto',
-          padding: '14px 20px',
+          padding: '14px var(--page-pad)',
           display: 'flex',
           alignItems: 'center',
           gap: 16,
@@ -1036,9 +1036,9 @@ export default function InteractiveExam({
 
         <main
           style={{
-            maxWidth: 1280,
+            maxWidth: 'var(--page-max)',
             margin: '0 auto',
-            padding: '32px 20px 80px',
+            padding: '32px var(--page-pad) 80px',
           }}
         >
           {/* Counter row */}
@@ -2145,9 +2145,9 @@ export default function InteractiveExam({
       {Header}
       <main
         style={{
-          maxWidth: 1180,
+          maxWidth: 'var(--page-max)',
           margin: '0 auto',
-          padding: '32px 24px 80px',
+          padding: '32px var(--page-pad) 80px',
           display: 'flex',
           flexDirection: 'column',
           gap: 20,

@@ -325,12 +325,12 @@ export default async function DashboardPage() {
         .dash-mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
 
         .dash-hero {
-          position: relative; padding: 52px 40px 132px;
+          position: relative; padding: 52px var(--page-pad) 132px;
           background: var(--bg-elev); border-bottom: 1px solid var(--bd);
           background-image: radial-gradient(color-mix(in srgb, var(--clr-primary) 14%, transparent) 1px, transparent 1px);
           background-size: 26px 26px;
         }
-        .dash-hero-inner { max-width: 1280px; margin: 0 auto; display: flex; align-items: flex-start; justify-content: space-between; gap: 40px; flex-wrap: wrap; }
+        .dash-hero-inner { max-width: var(--page-max); margin: 0 auto; display: flex; align-items: flex-start; justify-content: space-between; gap: 40px; flex-wrap: wrap; }
         .dash-hero-text  { display: flex; flex-direction: column; gap: 14px; max-width: 700px; }
         .dash-badge {
           align-self: flex-start; display: inline-flex; align-items: center; gap: 8px;
@@ -349,7 +349,7 @@ export default async function DashboardPage() {
         .dash-btn-ghost { border: 1px solid var(--bd); background: var(--bg-elev); color: var(--fg); }
         .dash-btn-solid { background: var(--clr-primary); color: #fff; box-shadow: 0 8px 20px color-mix(in srgb, var(--clr-primary) 28%, transparent); }
 
-        .dash-main { position: relative; z-index: 1; max-width: 1280px; margin: -92px auto 0; padding: 0 40px; display: flex; flex-direction: column; gap: 24px; }
+        .dash-main { position: relative; z-index: 1; max-width: var(--page-max); margin: -92px auto 0; padding: 0 var(--page-pad); display: flex; flex-direction: column; gap: 24px; }
 
         .dash-card { background: var(--bg-elev); border: 1px solid var(--bd); border-radius: 20px; padding: 26px; }
         .dash-panel { background: var(--panel-dark); color: var(--panel-dark-fg); border-radius: 20px; }
@@ -389,11 +389,11 @@ export default async function DashboardPage() {
           .dash-row, .dash-row-2 { grid-template-columns: 1fr; }
         }
         @media (max-width: 768px) {
-          .dash-hero { padding: 32px 18px 110px; }
+          .dash-hero { padding: 32px var(--page-pad) 110px; }
           .dash-hero-inner { flex-direction: column; align-items: stretch; gap: 22px; }
           .dash-h1 { font-size: 30px; }
           .dash-lede { font-size: 14.5px; }
-          .dash-main { padding: 0 18px; margin-top: -84px; }
+          .dash-main { padding: 0 var(--page-pad); margin-top: -84px; }
           .dash-kpi { grid-template-columns: 1fr; }
           .dash-card { padding: 20px; }
         }

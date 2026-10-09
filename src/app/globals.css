@@ -294,6 +294,14 @@ html {
   background-color: var(--bg);
 }
 
+/* ── Page width (student pages) ──
+   One place to change how wide every student page is.
+   Content fills the screen up to --page-max, then stays centered. */
+:root {
+  --page-max: 1920px;
+  --page-pad: clamp(16px, 3.5vw, 48px);
+}
+
 /* ── Shared UI classes ── */
 .year-card {
   background: var(--bg-elev);

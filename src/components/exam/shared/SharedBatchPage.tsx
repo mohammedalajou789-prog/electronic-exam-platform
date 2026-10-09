@@ -58,7 +58,7 @@ const AVATAR_TONES = [
 
 const BATCH_CSS = `
   .bp { min-height: 100vh; background: var(--bg); color: var(--fg); font-family: "Plus Jakarta Sans", system-ui, sans-serif; }
-  .bp-wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+  .bp-wrap { max-width: var(--page-max); margin: 0 auto; padding: 0 var(--page-pad); }
 
   /* ── Cover ── */
   .bp-band { position: relative; overflow: hidden; background-color: var(--bg-elev); border-bottom: 1px solid var(--bd); padding: 22px 0 28px; }
@@ -165,7 +165,7 @@ const BATCH_CSS = `
     .bp-num { display: none; }
   }
   @media (max-width: 640px) {
-    .bp-wrap { padding: 0 16px; }
+    .bp-wrap { padding: 0 var(--page-pad); }
     .bp-band { padding: 18px 0 22px; }
     .bp-head { gap: 18px; }
     .bp-spec { display: grid; grid-template-columns: repeat(4, auto); justify-content: start; gap: 0; }

@@ -62,7 +62,7 @@ export default async function SharedReviewPage({
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)', fontFamily: '"Plus Jakarta Sans", system-ui, sans-serif' }}>
-      <main style={{ padding: '32px 28px 80px' }}>
+      <main style={{ maxWidth: 'var(--page-max)', margin: '0 auto', padding: '32px var(--page-pad) 80px' }}>
 
         {/* Top bar */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
