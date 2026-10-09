@@ -25,8 +25,6 @@ interface SavedProgress {
   totalQuestions: number
   /** 1-based number of the question "Continue" opens (first unanswered from where the student left) */
   nextQuestion: number
-  /** Seen in this attempt but not answered yet (they become "skipped" on Finish) */
-  seenUnanswered: number
   elapsedSeconds: number
   isPart: boolean
 }
@@ -45,7 +43,6 @@ interface OpenAttemptRow {
   time_spent: number
   total_questions: number
   question_ids: string[] | null
-  viewed_ids: string[] | null
   attempt_answers: { question_id: string }[] | null
 }
 
@@ -302,7 +299,7 @@ async function loadStudentData(
   const [attemptRes, progressRes, orderRes] = await Promise.all([
     supabase
       .from('exam_attempts')
-      .select('current_index, time_spent, total_questions, question_ids, viewed_ids, attempt_answers(question_id)')
+      .select('current_index, time_spent, total_questions, question_ids, attempt_answers(question_id)')
       .eq('user_id', userId)
       .eq('exam_id', examId)
       .eq('status', 'in_progress')
@@ -333,15 +330,11 @@ async function loadStudentData(
     const order = ((orderRes.data ?? []) as { id: string }[])
       .map(q => q.id)
       .filter(id => !inAttempt || inAttempt.has(id))
-    const seenUnanswered = (attempt.viewed_ids ?? [])
-      .filter(id => !answered.has(id) && (!inAttempt || inAttempt.has(id)))
-      .length
 
     savedProgress = {
       answeredCount,
       totalQuestions: attempt.total_questions,
       nextQuestion: resumeIndex(order, id => answered.has(id), attempt.current_index ?? 0) + 1,
-      seenUnanswered,
       elapsedSeconds: attempt.time_spent ?? 0,
       isPart: attempt.question_ids !== null,
     }
@@ -627,12 +620,6 @@ export default async function SharedExamPrepPage({
                 <div className="pp-progress-meta">
                   <span><ArrowRight size={13} />Next: question {nextQuestion}</span>
                   {elapsedLabel && <span><Clock size={13} /><span className="pp-mono">{elapsedLabel}</span> spent</span>}
-                  {savedProgress.seenUnanswered > 0 && (
-                    <span title="They count as skipped when you finish the exam">
-                      <i className="pp-dot pp-seg-skipped" />
-                      {savedProgress.seenUnanswered} seen without an answer
-                    </span>
-                  )}
                 </div>
               </div>
             )}

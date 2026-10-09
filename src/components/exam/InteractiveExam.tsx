@@ -1704,6 +1704,17 @@ export default function InteractiveExam({
                   }}
                   onClick={() => {
                     setRestartConfirmOpen(false)
+                    // Save what was seen in the attempt being left (seen and unanswered
+                    // questions become "skipped"); the old attempt is then closed
+                    const leavingAttemptId = attemptIdRef.current
+                    if (leavingAttemptId) {
+                      void saveAttemptProgress(leavingAttemptId, {
+                        elapsedSeconds: secondsRef.current,
+                        currentIndex: currentRef.current,
+                        viewedIds: Array.from(viewedRef.current),
+                        flaggedIds: Object.keys(flaggedRef.current).filter(id => flaggedRef.current[id]),
+                      })
+                    }
                     setAnswers({})
                     setFlagged({})
                     setCurrent(0)
