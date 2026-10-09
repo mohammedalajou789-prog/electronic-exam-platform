@@ -13,6 +13,7 @@ import {
   type ExamTarget,
   type AnswerPayload,
 } from '@/features/exam-engine/attempt-client'
+import { resumeIndex } from '@/features/exam-engine/resume-position'
 import { refreshStudyTip } from '@/app/actions/compute-study-tip'
 import {
   REPORT_CATEGORIES,
@@ -252,7 +253,10 @@ export default function InteractiveExam({
   const targetCustomExamId = target.customExamId
 
   // ── State initialised from savedProgress when resuming ────────────────────
-  const startIndex = Math.min(savedProgress?.currentIndex ?? 0, Math.max(questions.length - 1, 0))
+  // "Continue" opens the first unanswered question from where the student left
+  const startIndex = savedProgress
+    ? resumeIndex(questions.map(q => q.id), id => !!savedProgress.answers[id], savedProgress.currentIndex)
+    : 0
   const [mode, setMode] = useState<Mode>('play')
   const [current, setCurrent] = useState(startIndex)
   const [answers, setAnswers] = useState<Record<string, string>>(

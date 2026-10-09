@@ -7,6 +7,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { resumeIndex } from '@/features/exam-engine/resume-position'
 import {
   Clock, Play, Eye, Download,
   RotateCcw, ArrowRight, ChevronRight, Check, CircleDashed,
@@ -22,7 +23,10 @@ interface SavedProgress {
   answeredCount: number
   /** Questions in the attempt (fewer than the exam in "unanswered only" mode) */
   totalQuestions: number
-  currentIndex: number
+  /** 1-based number of the question "Continue" opens (first unanswered from where the student left) */
+  nextQuestion: number
+  /** Seen in this attempt but not answered yet (they become "skipped" on Finish) */
+  seenUnanswered: number
   elapsedSeconds: number
   isPart: boolean
 }
@@ -41,6 +45,7 @@ interface OpenAttemptRow {
   time_spent: number
   total_questions: number
   question_ids: string[] | null
+  viewed_ids: string[] | null
   attempt_answers: { question_id: string }[] | null
 }
 
@@ -231,12 +236,12 @@ const PREP_CSS = `
   .pp-note { display: flex; align-items: flex-start; justify-content: center; gap: 6px; text-align: center; font-size: 11.5px; line-height: 1.45; font-weight: 600; color: var(--fg-faint); }
   .pp-note svg { flex-shrink: 0; margin-top: 1px; }
 
-  /* Solved / skipped / unsolved split of this exam */
+  /* Solved / skipped / unsolved split of this exam (the dot colors match the bar) */
   .pp-split { display: flex; height: 8px; border-radius: 999px; background: var(--track); overflow: hidden; }
   .pp-split i { display: block; height: 100%; }
-  .pp-seg-solved  { background: var(--clr-primary); }
-  .pp-seg-skipped { background: var(--tone-amber-fg); }
   .pp-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--track); }
+  .pp-seg-solved  { background: var(--clr-primary); }
+  .pp-seg-skipped { background: oklch(76% 0.16 70); }
 
   .pp-modes-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .pp-mode {
@@ -294,35 +299,56 @@ async function loadStudentData(
   const userId = typeof claimsData?.claims?.sub === 'string' ? claimsData.claims.sub : null
   if (!userId) return { savedProgress: null, examProgress: null }
 
-  const [attemptRes, progressRes] = await Promise.all([
+  const [attemptRes, progressRes, orderRes] = await Promise.all([
     supabase
       .from('exam_attempts')
-      .select('current_index, time_spent, total_questions, question_ids, attempt_answers(question_id)')
+      .select('current_index, time_spent, total_questions, question_ids, viewed_ids, attempt_answers(question_id)')
       .eq('user_id', userId)
       .eq('exam_id', examId)
       .eq('status', 'in_progress')
       .not('attempt_answers.chosen_answer', 'is', null)
       .maybeSingle(),
     supabase.rpc('get_my_exam_progress', { p_exam_id: examId }),
+    // Question order, to know which question "Continue" opens
+    supabase
+      .from('questions')
+      .select('id')
+      .eq('exam_id', examId)
+      .is('deleted_at', null)
+      .order('question_order', { ascending: true }),
   ])
 
   if (attemptRes.error) console.error('[SharedExamPrepPage] Open attempt query failed:', attemptRes.error.message)
   if (progressRes.error) console.error('[SharedExamPrepPage] Exam progress query failed:', progressRes.error.message)
+  if (orderRes.error) console.error('[SharedExamPrepPage] Question order query failed:', orderRes.error.message)
 
   const attempt = attemptRes.data as unknown as OpenAttemptRow | null
-  const answeredCount = attempt?.attempt_answers?.length ?? 0
+  const answered = new Set((attempt?.attempt_answers ?? []).map(a => a.question_id))
+  const answeredCount = answered.size
+
+  let savedProgress: SavedProgress | null = null
+  // An attempt that was opened but never answered is not worth continuing
+  if (attempt && answeredCount > 0) {
+    const inAttempt = attempt.question_ids ? new Set(attempt.question_ids) : null
+    const order = ((orderRes.data ?? []) as { id: string }[])
+      .map(q => q.id)
+      .filter(id => !inAttempt || inAttempt.has(id))
+    const seenUnanswered = (attempt.viewed_ids ?? [])
+      .filter(id => !answered.has(id) && (!inAttempt || inAttempt.has(id)))
+      .length
+
+    savedProgress = {
+      answeredCount,
+      totalQuestions: attempt.total_questions,
+      nextQuestion: resumeIndex(order, id => answered.has(id), attempt.current_index ?? 0) + 1,
+      seenUnanswered,
+      elapsedSeconds: attempt.time_spent ?? 0,
+      isPart: attempt.question_ids !== null,
+    }
+  }
 
   return {
-    // An attempt that was opened but never answered is not worth continuing
-    savedProgress: attempt && answeredCount > 0
-      ? {
-          answeredCount,
-          totalQuestions: attempt.total_questions,
-          currentIndex: attempt.current_index ?? 0,
-          elapsedSeconds: attempt.time_spent ?? 0,
-          isPart: attempt.question_ids !== null,
-        }
-      : null,
+    savedProgress,
     examProgress: (progressRes.data as ExamProgress | null) ?? null,
   }
 }
@@ -426,7 +452,7 @@ export default async function SharedExamPrepPage({
   const progressPct = attemptTotal > 0
     ? Math.min(100, Math.round((answeredCount / attemptTotal) * 100))
     : 0
-  const nextQuestion = savedProgress ? savedProgress.currentIndex + 1 : 1
+  const nextQuestion = savedProgress?.nextQuestion ?? 1
   const elapsedLabel = savedProgress?.elapsedSeconds
     ? formatElapsed(savedProgress.elapsedSeconds)
     : null
@@ -601,6 +627,12 @@ export default async function SharedExamPrepPage({
                 <div className="pp-progress-meta">
                   <span><ArrowRight size={13} />Next: question {nextQuestion}</span>
                   {elapsedLabel && <span><Clock size={13} /><span className="pp-mono">{elapsedLabel}</span> spent</span>}
+                  {savedProgress.seenUnanswered > 0 && (
+                    <span title="They count as skipped when you finish the exam">
+                      <i className="pp-dot pp-seg-skipped" />
+                      {savedProgress.seenUnanswered} seen without an answer
+                    </span>
+                  )}
                 </div>
               </div>
             )}
