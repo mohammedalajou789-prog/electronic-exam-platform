@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { ExplanationRenderer } from '@/components/exam/ExplanationRenderer'
+import ExamResultView, { type ChapterResult } from '@/components/exam/ExamResultView'
 import {
   startAttempt,
   recordAnswer,
@@ -623,6 +624,22 @@ export default function InteractiveExam({
     await saveResults(elapsed)
   }
 
+  /** Result screen "Retake": a clean retake of the same questions in a brand-new attempt. */
+  function retake(): void {
+    startNewAttempt()
+    setAnswers({})
+    setFlagged({})
+    setCurrent(0)
+    currentRef.current = 0
+    answersRef.current = {}
+    flaggedRef.current = {}
+    setSecondsElapsed(0)
+    secondsRef.current = 0
+    setFinalTimeTaken(0)
+    setSaveError(false)
+    setMode('play')
+  }
+
   // ── Navigation helpers ────────────────────────────────────────────────────
 
   function selectAnswer(qid: string, key: string): void {
@@ -700,22 +717,6 @@ export default function InteractiveExam({
   const unansweredQuestions = questions.filter(q => !answers[q.id])
   const skippedCount = unansweredQuestions.filter(q => finalViewed.has(q.id)).length
   const notSeenCount = unansweredQuestions.length - skippedCount
-  const scorePercent = questions.length > 0 ? Math.round((correctCount / questions.length) * 100) : 0
-  const timeTakenLabel = `${Math.floor(finalTimeTaken / 60)}:${String(finalTimeTaken % 60).padStart(2, '0')}`
-  const gaugeColor =
-    scorePercent >= 80
-      ? 'var(--accent-green)'
-      : scorePercent >= 50
-      ? 'var(--accent-blue)'
-      : 'var(--primary)'
-  const resultHeadline =
-    scorePercent >= 80
-      ? 'Excellent Work!'
-      : scorePercent >= 50
-      ? 'Good Effort!'
-      : 'Keep Practicing!'
-  const circ = 2 * Math.PI * 78
-  const gaugeOffset = circ * (1 - scorePercent / 100)
 
   const byChapter: Record<string, { correct: number; total: number }> = {}
   questions.forEach(q => {
@@ -724,10 +725,10 @@ export default function InteractiveExam({
     byChapter[ch].total++
     if (answers[q.id] === q.correct_answer) byChapter[ch].correct++
   })
-  const chapterStats = Object.entries(byChapter).map(([chapter, v]) => ({
-    chapter,
-    label: `${v.correct}/${v.total}`,
-    pct: Math.round((v.correct / v.total) * 100),
+  const resultChapters: ChapterResult[] = Object.entries(byChapter).map(([name, v]) => ({
+    name,
+    correct: v.correct,
+    total: v.total,
   }))
 
   // ── Shared button style ───────────────────────────────────────────────────
@@ -2105,295 +2106,26 @@ export default function InteractiveExam({
   // ══════════════════════════════════════════════════════════════════════════
   if (mode === 'result') {
     return (
-      <div
-        style={{
-          minHeight: '100vh',
-          background: 'var(--bg)',
-          color: 'var(--fg)',
-          fontFamily: "'Plus Jakarta Sans',system-ui,sans-serif",
-        }}
-      >
-        <style>{sharedCSS}</style>
-        {Header}
-        <main
-          style={{
-            maxWidth: 1180,
-            margin: '0 auto',
-            padding: '40px 24px 80px',
-          }}
-        >
-          {/* Score card */}
-          <div
-            className="a-pop"
-            style={{
-              background: 'var(--bg-elev)',
-              border: '1px solid var(--bd)',
-              borderRadius: 20,
-              padding: '36px 30px',
-              boxShadow: '0 1px 3px var(--shadow)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              textAlign: 'center',
-              marginBottom: 24,
-            }}
-          >
-            <svg width="180" height="180" viewBox="0 0 180 180">
-              <circle cx="90" cy="90" r="78" fill="none" stroke="var(--bd)" strokeWidth="12" />
-              <circle
-                cx="90" cy="90" r="78" fill="none" stroke={gaugeColor} strokeWidth="12"
-                strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={gaugeOffset}
-                transform="rotate(-90 90 90)"
-                className="a-ring"
-                style={{ ['--c' as string]: circ } as React.CSSProperties}
-              />
-              <text x="90" y="85" textAnchor="middle" fill="var(--fg)" fontSize="32" fontWeight="800" fontFamily="inherit">
-                {scorePercent}%
-              </text>
-              <text x="90" y="108" textAnchor="middle" fill="var(--fg-muted)" fontSize="13" fontWeight="600" fontFamily="inherit">
-                {resultHeadline}
-              </text>
-            </svg>
-
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
-                gap: 12,
-                width: '100%',
-                marginTop: 8,
-              }}
-            >
-              {[
-                { label: 'Correct', value: correctCount, color: 'var(--accent-green)', bg: 'color-mix(in srgb, var(--accent-green) 14%, var(--bg-soft))' },
-                { label: 'Wrong',   value: wrongCount,   color: 'var(--primary)',       bg: 'color-mix(in srgb, var(--primary) 14%, var(--bg-soft))' },
-                { label: 'Skipped',  value: skippedCount, color: 'var(--fg-muted)',     bg: 'var(--bg-soft)' },
-                { label: 'Not seen', value: notSeenCount, color: 'var(--fg-muted)',     bg: 'var(--bg-soft)' },
-                {
-                  label: `Time (${questions.length} min suggested)`,
-                  value: timeTakenLabel,
-                  color: finalTimeTaken <= suggestedSeconds ? 'var(--accent-green)' : 'var(--primary)',
-                  bg: finalTimeTaken <= suggestedSeconds
-                    ? 'color-mix(in srgb, var(--accent-green) 14%, var(--bg-soft))'
-                    : 'color-mix(in srgb, var(--primary) 14%, var(--bg-soft))',
-                },
-              ].map((stat, i) => (
-                <div
-                  key={stat.label}
-                  className="a-rise"
-                  style={{ ...stagger(i + 2), padding: 14, borderRadius: 13, background: stat.bg, color: stat.color }}
-                >
-                  <div style={{ fontSize: 22, fontWeight: 800 }}>{stat.value}</div>
-                  <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, opacity: 0.8 }}>
-                    {stat.label}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Saving indicator */}
-          {isSaving && (
-            <div
-              style={{
-                marginBottom: 12,
-                padding: '12px 16px',
-                borderRadius: 12,
-                background: 'color-mix(in srgb, var(--accent-blue) 12%, var(--bg-elev))',
-                border: '1px solid var(--accent-blue)',
-                color: 'var(--accent-blue)',
-                fontSize: 13.5,
-                fontWeight: 700,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-              }}
-            >
-              <svg className="a-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-              </svg>
-              Saving your results...
-            </div>
-          )}
-          {saveError && (
-            <div
-              style={{
-                marginBottom: 12,
-                padding: '12px 16px',
-                borderRadius: 12,
-                background: 'color-mix(in srgb, var(--primary) 12%, var(--bg-elev))',
-                border: '1px solid var(--primary)',
-                color: 'var(--primary)',
-                fontSize: 13.5,
-                fontWeight: 700,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                <span>Could not save your results. Check your connection and try again.</span>
-                <button
-                  onClick={() => saveResults(finalTimeTaken)}
-                  disabled={isSaving}
-                  style={{
-                    padding: '8px 16px',
-                    borderRadius: 10,
-                    border: 'none',
-                    background: 'var(--primary)',
-                    color: 'white',
-                    fontWeight: 700,
-                    fontSize: 13,
-                    cursor: isSaving ? 'not-allowed' : 'pointer',
-                    opacity: isSaving ? 0.7 : 1,
-                    fontFamily: 'inherit',
-                  }}
-                >
-                  Retry
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Chapter breakdown */}
-          {chapterStats.length > 0 && (
-            <div
-              style={{
-                background: 'var(--bg-elev)',
-                border: '1px solid var(--bd)',
-                borderRadius: 16,
-                padding: '20px 24px',
-                marginBottom: 24,
-              }}
-            >
-              <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 14 }}>
-                By Chapter
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {chapterStats.map((cs, i) => (
-                  <div key={cs.chapter} className="a-rise" style={stagger(i)}>
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        fontSize: 13,
-                        fontWeight: 700,
-                        marginBottom: 6,
-                      }}
-                    >
-                      <span>{cs.chapter}</span>
-                      <span style={{ color: 'var(--fg-muted)' }}>{cs.label}</span>
-                    </div>
-                    <div
-                      style={{ height: 8, borderRadius: 999, background: 'var(--bg-soft)' }}
-                    >
-                      <div
-                        className="a-grow"
-                        style={{
-                          ...stagger(i),
-                          height: '100%',
-                          borderRadius: 999,
-                          width: `${cs.pct}%`,
-                          background:
-                            cs.pct >= 70
-                              ? 'var(--accent-green)'
-                              : cs.pct >= 40
-                              ? 'var(--accent-blue)'
-                              : 'var(--primary)',
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Action buttons */}
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <button
-              style={{
-                flex: '1 1 160px',
-                padding: 13,
-                borderRadius: 12,
-                border: 'none',
-                background: 'var(--primary)',
-                color: 'white',
-                fontWeight: 700,
-                fontSize: 14,
-                cursor: 'pointer',
-              }}
-              className="press"
-              onClick={() => setMode('review')}
-            >
-              Review Answers
-            </button>
-            <button
-              style={{
-                flex: '1 1 160px',
-                padding: 13,
-                borderRadius: 12,
-                border: '1px solid var(--bd)',
-                background: 'var(--bg-soft)',
-                color: 'var(--fg)',
-                fontWeight: 700,
-                fontSize: 14,
-                cursor: 'pointer',
-              }}
-              onClick={() => {
-                // Reset all state for a clean retake in a brand-new attempt
-                startNewAttempt()
-                setAnswers({})
-                setFlagged({})
-                setCurrent(0)
-                currentRef.current = 0
-                answersRef.current = {}
-                flaggedRef.current = {}
-                setSecondsElapsed(0)
-                secondsRef.current = 0
-                setFinalTimeTaken(0)
-                setSaveError(false)
-                setMode('play')
-              }}
-            >
-              Retake
-            </button>
-            {examUnanswered !== null && examUnanswered > 0 && (
-              <button
-                style={{
-                  flex: '1 1 160px',
-                  padding: 13,
-                  borderRadius: 12,
-                  border: '1px solid color-mix(in srgb, var(--accent-blue) 45%, var(--bd))',
-                  background: 'color-mix(in srgb, var(--accent-blue) 12%, var(--bg-soft))',
-                  color: 'var(--accent-blue)',
-                  fontWeight: 700,
-                  fontSize: 14,
-                  cursor: 'pointer',
-                }}
-                className="press a-rise"
-                title="Questions of this exam you have never answered (skipped or not seen yet)"
-                onClick={() => window.location.replace(`${prepPath}/play?set=unanswered`)}
-              >
-                Solve Unanswered ({examUnanswered})
-              </button>
-            )}
-            <button
-              style={{
-                flex: '1 1 160px',
-                padding: 13,
-                borderRadius: 12,
-                border: '1px solid var(--bd)',
-                background: 'transparent',
-                color: 'var(--fg-muted)',
-                fontWeight: 700,
-                fontSize: 14,
-                cursor: 'pointer',
-              }}
-              onClick={() => window.location.replace(prepPath)}
-            >
-              Exit
-            </button>
-          </div>
-        </main>
-      </div>
+      <ExamResultView
+        examTitle={exam.title}
+        kicker={[subjectName || (isCustomExam ? 'Custom Exam' : ''), batchName, 'Results'].filter(Boolean).join(' · ')}
+        total={questions.length}
+        correct={correctCount}
+        wrong={wrongCount}
+        skipped={skippedCount}
+        notSeen={notSeenCount}
+        timeSeconds={finalTimeTaken}
+        suggestedSeconds={suggestedSeconds}
+        chapters={resultChapters}
+        unansweredCount={isCustomExam ? null : examUnanswered}
+        isSaving={isSaving}
+        saveError={saveError}
+        onRetrySave={() => { void saveResults(finalTimeTaken) }}
+        onReview={() => setMode('review')}
+        onRetake={retake}
+        onSolveUnanswered={() => window.location.replace(`${prepPath}/play?set=unanswered`)}
+        onExit={() => window.location.replace(prepPath)}
+      />
     )
   }
 
