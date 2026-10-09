@@ -134,7 +134,7 @@ export default function EndSessionButton({ attemptId, examTitle }: Props) {
             disabled={loading}
             title="Ends the exam exactly like pressing Finish"
             style={{
-              padding: '8px 13px', borderRadius: 10, border: 'none',
+              padding: '7px 11px', borderRadius: 9, border: 'none',
               background: '#ef4444', color: 'white',
               fontSize: 12.5, fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer',
               opacity: loading ? 0.7 : 1, fontFamily: 'inherit',
@@ -146,7 +146,7 @@ export default function EndSessionButton({ attemptId, examTitle }: Props) {
             onClick={() => { setConfirm(false); setFailed(false) }}
             disabled={loading}
             style={{
-              padding: '8px 10px', borderRadius: 10,
+              padding: '7px 10px', borderRadius: 9,
               border: '1px solid var(--bd)', background: 'var(--bg-soft)',
               color: 'var(--fg)', fontSize: 12.5, fontWeight: 700,
               cursor: loading ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
@@ -169,7 +169,7 @@ export default function EndSessionButton({ attemptId, examTitle }: Props) {
       onClick={() => setConfirm(true)}
       title="Finish this exam now and see your result"
       style={{
-        padding: '8px 13px', borderRadius: 10,
+        padding: '7px 11px', borderRadius: 9,
         border: '1px solid color-mix(in srgb, #ef4444 35%, var(--bd))',
         background: 'color-mix(in srgb, #ef4444 8%, var(--bg-soft))',
         color: '#ef4444', fontSize: 12.5, fontWeight: 700,

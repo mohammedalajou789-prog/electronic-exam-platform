@@ -3,6 +3,7 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import EndSessionButton from '@/components/dashboard/EndSessionButton'
+import EndAllSessionsButton from '@/components/dashboard/EndAllSessionsButton'
 import StatInfo from '@/components/dashboard/StatInfo'
 import ReportsButton, { type DashboardReport } from '@/components/dashboard/ReportsButton'
 import SubjectProgressList from '@/components/dashboard/SubjectProgressList'
@@ -237,12 +238,6 @@ function timeAgo(iso: string): string {
   return `${months} month${months === 1 ? '' : 's'} ago`
 }
 
-function initialsOf(text: string): string {
-  const clean = (text || '').trim()
-  if (!clean) return '??'
-  return clean.slice(0, 2).toUpperCase()
-}
-
 /** Stagger index for the shared animation classes in globals.css */
 const stagger = (i: number): React.CSSProperties =>
   ({ ['--i' as string]: i } as React.CSSProperties)
@@ -387,6 +382,28 @@ export default async function DashboardPage() {
           padding: 26px; box-shadow: 0 18px 40px var(--shadow);
           /* Performance colors bright enough to read on the dark panel */
           --sp-high: #4ade80; --sp-mid: #fbbf24; --sp-low: var(--panel-accent);
+        }
+
+        /* Continue studying: one compact row per exam */
+        .dash-cs {
+          display: grid; grid-template-columns: minmax(0, 1fr) 96px auto; align-items: center; gap: 14px;
+          padding: 10px 12px; border-radius: 12px; background: var(--bg-soft); border: 1px solid var(--bd);
+          transition: border-color var(--dur-2), transform var(--dur-2) var(--ease-out);
+        }
+        .dash-cs:hover { border-color: var(--bd-strong); transform: translateX(3px); }
+        .dash-cs-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+        .dash-cs-title { font-size: 14px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .dash-cs-sub { font-size: 12px; font-weight: 600; color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .dash-cs-prog { display: flex; align-items: center; gap: 8px; }
+        .dash-cs-actions { display: flex; align-items: center; gap: 6px; }
+        .dash-cs-go {
+          display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 9px;
+          background: var(--clr-primary); color: #fff; font-size: 12.5px; font-weight: 700; text-decoration: none;
+        }
+        @media (max-width: 640px) {
+          /* Phone: the name on its own line, progress and buttons below it */
+          .dash-cs { grid-template-columns: minmax(0, 1fr) auto; row-gap: 10px; }
+          .dash-cs-text { grid-column: 1 / -1; }
         }
 
         .dash-item { padding: 16px 18px; border-radius: 14px; background: var(--bg-soft); border: 1px solid var(--bd); }
@@ -587,46 +604,43 @@ export default async function DashboardPage() {
                 <h2 className="dash-h2">Continue studying</h2>
                 <span className="dash-pill">{progress.length}</span>
               </div>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-muted)' }}>Sorted by last activity</span>
+              {progress.length > 1 && (
+                <EndAllSessionsButton
+                  sessions={progress.map(p => ({
+                    attemptId: p.id,
+                    title: p.title,
+                    subtitle: [p.subjectName, p.batchName].filter(Boolean).join(' · '),
+                  }))}
+                />
+              )}
             </div>
 
             {progress.length === 0 ? (
               <div className="dash-empty">No exams in progress. Pick a year below to start one.</div>
             ) : (
-              <div className="dash-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div className="dash-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {progress.map((p, i) => {
-                  const subjectName = p.subjectName
-                  const batchName = p.batchName
                   const total = p.total
                   const done = p.answered
                   const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0
+                  const where = [p.subjectName, p.batchName].filter(Boolean).join(' · ')
                   return (
-                    <div key={p.id} className="dash-item a-rise" style={{ ...stagger(Math.min(i, 8)), display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
-                      <span style={{ width: 46, height: 46, flexShrink: 0, borderRadius: 12, background: 'var(--bg-elev)', border: '1px solid var(--bd)', color: 'var(--clr-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800 }}>
-                        {initialsOf(subjectName || p.title)}
-                      </span>
-                      <div style={{ flexGrow: 1, minWidth: 180, display: 'flex', flexDirection: 'column', gap: 7 }}>
-                        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
-                          <span style={{ fontSize: 14.5, fontWeight: 700 }}>{p.title}</span>
-                          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-muted)', flexShrink: 0 }}>{timeAgo(p.lastActivity)}</span>
-                        </div>
-                        {(subjectName || batchName) && (
-                          <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--fg-muted)' }}>
-                            {subjectName}{batchName ? ` · ${batchName}` : ''}
-                          </span>
-                        )}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                          <div className="dash-track" style={{ flexGrow: 1 }}>
-                            <div className="dash-track-fill a-grow" style={{ ...stagger(Math.min(i, 8)), width: `${pct}%`, background: 'var(--clr-primary)' }} />
-                          </div>
-                          <span className="dash-mono" title="Questions answered in this attempt" style={{ fontSize: 12, fontWeight: 600, color: 'var(--clr-primary)', flexShrink: 0 }}>
-                            {done} / {total || '?'}
-                          </span>
-                        </div>
+                    <div key={p.id} className="dash-cs a-rise" style={stagger(Math.min(i, 8))}>
+                      <div className="dash-cs-text">
+                        <span className="dash-cs-title">{p.title}</span>
+                        <span className="dash-cs-sub">{where ? `${where} · ` : ''}{timeAgo(p.lastActivity)}</span>
                       </div>
-                      <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                        <Link href={`/dashboard/resume/${p.examId}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '10px 16px', borderRadius: 10, background: 'var(--clr-primary)', color: '#fff', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21" /></svg>
+                      <div className="dash-cs-prog" title="Questions answered in this attempt">
+                        <div className="dash-track" style={{ flexGrow: 1, height: 5 }}>
+                          <div className="dash-track-fill a-grow" style={{ ...stagger(Math.min(i, 8)), width: `${pct}%`, background: 'var(--clr-primary)' }} />
+                        </div>
+                        <span className="dash-mono" style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--clr-primary)', flexShrink: 0 }}>
+                          {done}/{total || '?'}
+                        </span>
+                      </div>
+                      <div className="dash-cs-actions">
+                        <Link href={`/dashboard/resume/${p.examId}`} className="dash-cs-go press">
+                          <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21" /></svg>
                           Continue
                         </Link>
                         <EndSessionButton attemptId={p.id} examTitle={p.title} />
