@@ -114,9 +114,10 @@ const STAT_HELP = {
 
 // ── Data fetching ──────────────────────────────────────────────────────────────
 
-async function getDashboardData(userId: string) {
-  const supabase = await createServerSupabaseClient()
+type ServerSupabase = Awaited<ReturnType<typeof createServerSupabaseClient>>
 
+// Uses the page's own client: one cookie read, one client per request
+async function getDashboardData(supabase: ServerSupabase, userId: string) {
   const [
     { data: user },
     { data: statsRaw },
@@ -305,10 +306,17 @@ function withShare<T extends { count: number }>(list: T[]): (T & { share: number
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
+// Links to the student's own pages (Continue, custom exams, wrong questions, bookmarks) use
+// prefetch={false}: those pages are dynamic, so a prefetch only runs their server code again
+// and its result is not reused when the link is clicked.
 export default async function DashboardPage() {
   const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  // getClaims() checks the session locally with the project's signing key (no call to the
+  // Auth server, unlike getUser()). The proxy has already sent signed-out visitors to /login.
+  const { data: claimsData } = await supabase.auth.getClaims()
+  const userId = typeof claimsData?.claims?.sub === 'string' ? claimsData.claims.sub : null
+  if (!userId) redirect('/login')
+  const userEmail = typeof claimsData?.claims?.email === 'string' ? claimsData.claims.email : ''
 
   const {
     user: profile,
@@ -322,7 +330,7 @@ export default async function DashboardPage() {
     recentReports,
     studyTips,
     myCustomExams,
-  } = await getDashboardData(user.id)
+  } = await getDashboardData(supabase, userId)
 
   const answered = stats?.questions_solved ?? 0
   const correct = stats?.first_attempt_correct ?? 0
@@ -336,7 +344,7 @@ export default async function DashboardPage() {
 
   // Greet with the first name only ("Mohammed El-Ajou" -> "Mohammed")
   const firstName =
-    (profile?.display_name ?? '').trim().split(/\s+/)[0] || user.email?.split('@')[0] || 'Student'
+    (profile?.display_name ?? '').trim().split(/\s+/)[0] || userEmail.split('@')[0] || 'Student'
   const today = new Date().toLocaleDateString('en-GB', {
     weekday: 'long', day: 'numeric', month: 'long',
   })
@@ -526,7 +534,7 @@ export default async function DashboardPage() {
               Browse exams
             </a>
             <ReportsButton reports={recentReports} />
-            <Link href={resumeHref} className="dash-btn dash-btn-ghost press">
+            <Link prefetch={false} href={resumeHref} className="dash-btn dash-btn-ghost press">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21" /></svg>
               Resume last exam
             </Link>
@@ -701,7 +709,7 @@ export default async function DashboardPage() {
                         </span>
                       </div>
                       <div className="dash-cs-actions">
-                        <Link href={p.continueHref} className="dash-cs-go press">
+                        <Link prefetch={false} href={p.continueHref} className="dash-cs-go press">
                           <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21" /></svg>
                           Continue
                         </Link>
@@ -755,7 +763,7 @@ export default async function DashboardPage() {
             <div className="dash-scroll" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 440px), 1fr))', gap: 8, alignContent: 'start' }}>
               {myCustomExams.map((c, i) => (
                 <div key={c.id} className="dash-cs dash-ce a-rise" style={stagger(Math.min(i, 8))}>
-                  <Link href={`/dashboard/custom/${c.id}`} className="dash-cs-text dash-ce-link">
+                  <Link prefetch={false} href={`/dashboard/custom/${c.id}`} className="dash-cs-text dash-ce-link">
                     <span className="dash-cs-title">{c.name}</span>
                     <span className="dash-cs-sub">
                       {[c.subjectName, `${c.questionCount} question${c.questionCount === 1 ? '' : 's'}`, formatShortDate(c.createdAt)].filter(Boolean).join(' · ')}
@@ -769,7 +777,7 @@ export default async function DashboardPage() {
                     <span className="dash-ce-tag dash-ce-tag-new">Not started</span>
                   )}
                   <div className="dash-cs-actions">
-                    <Link href={`/dashboard/custom/${c.id}`} className="dash-cs-go press">Open</Link>
+                    <Link prefetch={false} href={`/dashboard/custom/${c.id}`} className="dash-cs-go press">Open</Link>
                     <DeleteCustomExamButton customExamId={c.id} name={c.name} />
                   </div>
                 </div>
@@ -793,7 +801,7 @@ export default async function DashboardPage() {
                   </span>
                 </div>
               </div>
-              <Link href="/dashboard/wrong-questions" className="dash-link">
+              <Link prefetch={false} href="/dashboard/wrong-questions" className="dash-link">
                 View all
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M13 6l6 6-6 6" /></svg>
               </Link>
@@ -803,7 +811,7 @@ export default async function DashboardPage() {
             ) : (
               <div className="dash-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {wrongRanked.map((s, i) => (
-                  <Link key={s.subjectName} href={`/dashboard/wrong-questions?subject=${encodeURIComponent(s.subjectName)}`}
+                  <Link prefetch={false} key={s.subjectName} href={`/dashboard/wrong-questions?subject=${encodeURIComponent(s.subjectName)}`}
                     className="dash-bar-link a-rise"
                     style={{ ...stagger(Math.min(i, 8)), display: 'grid', gridTemplateColumns: 'minmax(80px, 130px) minmax(0, 1fr) 90px', alignItems: 'center', gap: 14, padding: '12px 14px', borderRadius: 12, background: 'var(--bg-soft)', border: '1px solid var(--bd)', textDecoration: 'none', color: 'var(--fg)' }}>
                     <span style={{ fontSize: 13.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.subjectName}</span>
@@ -828,7 +836,7 @@ export default async function DashboardPage() {
                   </span>
                 </div>
               </div>
-              <Link href="/dashboard/bookmarks" className="dash-link">
+              <Link prefetch={false} href="/dashboard/bookmarks" className="dash-link">
                 View all
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M13 6l6 6-6 6" /></svg>
               </Link>
@@ -838,7 +846,7 @@ export default async function DashboardPage() {
             ) : (
               <div className="dash-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {bookmarksRanked.map((s, i) => (
-                  <Link key={s.subjectName} href={`/dashboard/bookmarks?subject=${encodeURIComponent(s.subjectName)}`}
+                  <Link prefetch={false} key={s.subjectName} href={`/dashboard/bookmarks?subject=${encodeURIComponent(s.subjectName)}`}
                     className="dash-bar-link a-rise"
                     style={{ ...stagger(Math.min(i, 8)), display: 'grid', gridTemplateColumns: 'minmax(80px, 130px) minmax(0, 1fr) 90px', alignItems: 'center', gap: 14, padding: '12px 14px', borderRadius: 12, background: 'var(--bg-soft)', border: '1px solid var(--bd)', textDecoration: 'none', color: 'var(--fg)' }}>
                     <span style={{ fontSize: 13.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.subjectName}</span>

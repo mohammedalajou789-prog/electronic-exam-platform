@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { Search, Sun, Moon, User, LogOut, Menu, X, Home, LayoutDashboard, ShieldCheck } from 'lucide-react'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
+import type { Session, User as AuthUser } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
 import { useTheme } from '@/components/shared/ThemeProvider'
 
@@ -13,11 +14,37 @@ interface Suggestion {
   icon: string
 }
 
+// "Is this user an admin?" is asked once per user and browser tab. The Navbar is mounted
+// again when moving between the public pages and the dashboard (two layouts), so the
+// answer is kept here, outside the component. It only decides whether the Admin Panel
+// button is shown: admin pages are protected on the server (proxy + RLS).
+let adminLookup: { userId: string; result: Promise<boolean> } | null = null
+
+function loadIsAdmin(supabase: ReturnType<typeof createClient>, userId: string): Promise<boolean> {
+  if (adminLookup?.userId !== userId) {
+    const result = (async (): Promise<boolean> => {
+      // maybeSingle(): a student has no admins row, which is a normal answer, not an error
+      // (single() made the API answer 406 for every student)
+      const { data, error } = await supabase
+        .from('admins').select('role').eq('user_id', userId).maybeSingle()
+      if (error) {
+        adminLookup = null // try again on the next page instead of keeping a failure
+        return false
+      }
+      return Boolean(data)
+    })()
+    adminLookup = { userId, result }
+  }
+  return adminLookup.result
+}
+
 export default function Navbar() {
   const [searchQuery, setSearchQuery] = useState('')
-  const [user, setUser] = useState<any>(null)
+  const [user, setUser] = useState<AuthUser | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
   const [mounted, setMounted] = useState(false)
+  // True once the signed-in state is known, so Login / Sign Up never flash for a signed-in student
+  const [authReady, setAuthReady] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
@@ -36,27 +63,34 @@ export default function Navbar() {
 
   useEffect(() => {
     setMounted(true)
-    supabase.auth.getUser().then(async ({ data }) => {
-      setUser(data.user)
-      if (data.user) {
-        const { data: adminData } = await supabase
-          .from('admins').select('role').eq('user_id', data.user.id).single()
-        setIsAdmin(!!adminData)
+    let active = true
+
+    // The session stored in this browser decides which buttons are shown. It is read
+    // locally (no call to the Auth server, unlike getUser()). onAuthStateChange reports
+    // it right away (INITIAL_SESSION) and again after sign-in, sign-out or a token refresh.
+    function applySession(session: Session | null): void {
+      if (!active) return
+      const nextUser = session?.user ?? null
+      setUser(nextUser)
+      setAuthReady(true)
+      if (!nextUser) {
+        setIsAdmin(false)
+        return
       }
+      loadIsAdmin(supabase, nextUser.id).then(admin => {
+        if (active) setIsAdmin(admin)
+      })
+    }
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      // Supabase advises not to call other Supabase functions inside this callback
+      // (it can lock the auth client), so the admin lookup runs just after it.
+      setTimeout(() => applySession(session), 0)
     })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        setUser(session?.user || null)
-        if (session?.user) {
-          const { data: adminData } = await supabase
-            .from('admins').select('role').eq('user_id', session.user.id).single()
-          setIsAdmin(!!adminData)
-        } else {
-          setIsAdmin(false)
-        }
-      }
-    )
-    return () => subscription.unsubscribe()
+    return () => {
+      active = false
+      subscription.unsubscribe()
+    }
   }, [])
 
   useEffect(() => {
@@ -202,19 +236,19 @@ export default function Navbar() {
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '10px 10px 0' }}>
-          {mounted && !user && (
+          {authReady && !user && (
             <Link href="/" onClick={closeSidebar} className="sb-link">
               <Home size={15} style={{ color: 'var(--clr-primary)', flexShrink: 0 }} />
               Home
             </Link>
           )}
-          {mounted && user && (
+          {authReady && user && (
             <Link href="/dashboard" onClick={closeSidebar} className="sb-link">
               <LayoutDashboard size={15} style={{ color: 'var(--clr-primary)', flexShrink: 0 }} />
               Dashboard
             </Link>
           )}
-          {mounted && isAdmin && (
+          {authReady && isAdmin && (
             <Link href="/admin" onClick={closeSidebar} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 9, background: 'var(--clr-primary)', color: '#fff', fontSize: 13.5, fontWeight: 700, textDecoration: 'none', marginTop: 4 }}>
               <ShieldCheck size={15} />
               Admin Panel
@@ -230,12 +264,12 @@ export default function Navbar() {
             }
           </button>
           <div className="sb-divider" />
-          {mounted && user ? (
+          {authReady && user ? (
             <button onClick={handleLogout} className="sb-link" style={{ width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', color: 'var(--fg-muted)' }}>
               <LogOut size={15} style={{ flexShrink: 0 }} />
               Logout
             </button>
-          ) : mounted ? (
+          ) : authReady ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7, paddingTop: 2 }}>
               <Link href="/login" onClick={closeSidebar} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '9px', borderRadius: 9, border: '1px solid var(--bd)', background: 'var(--bg-soft)', color: 'var(--fg)', fontSize: 13.5, fontWeight: 700, textDecoration: 'none' }}>Login</Link>
               <Link href="/register" onClick={closeSidebar} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '9px', borderRadius: 9, background: 'var(--clr-primary)', color: '#fff', fontSize: 13.5, fontWeight: 700, textDecoration: 'none' }}>Sign Up</Link>
@@ -255,7 +289,7 @@ export default function Navbar() {
         <div style={{ width: '100%', maxWidth: 'var(--page-max)', margin: '0 auto', padding: '0 var(--page-pad)', height: 60, display: 'flex', alignItems: 'center', gap: 12 }}>
 
           {/* Logo */}
-          <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none', flexShrink: 0 }}>
+          <Link href={user ? '/dashboard' : '/'} style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none', flexShrink: 0 }}>
             <img src="/images/logo.jpg" alt="Medical Club" style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover' }} />
             <div style={{ lineHeight: 1.2 }}>
               <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg)' }}>Medical Club</div>
@@ -265,10 +299,10 @@ export default function Navbar() {
 
           {/* Desktop nav */}
           <nav className="nb-desktop" style={{ alignItems: 'center', gap: 4, marginLeft: 8 }}>
-            {mounted && !user && (
+            {authReady && !user && (
               <Link href="/" style={{ borderRadius: 10, border: '1px solid var(--bd)', padding: '7px 14px', fontSize: 14, fontWeight: 600, color: 'var(--fg)', textDecoration: 'none' }}>Home</Link>
             )}
-            {mounted && user && (
+            {authReady && user && (
               <Link href="/dashboard" style={{ borderRadius: 10, border: '1px solid var(--bd)', padding: '7px 14px', fontSize: 14, fontWeight: 600, color: 'var(--fg)', textDecoration: 'none' }}>Dashboard</Link>
             )}
           </nav>
@@ -310,7 +344,7 @@ export default function Navbar() {
             <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} style={{ width: 38, height: 38, borderRadius: 10, border: '1px solid var(--bd)', background: 'var(--bg-soft)', color: 'var(--fg)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {mounted ? (theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />) : <Moon size={17} />}
             </button>
-            {mounted && user ? (
+            {authReady && user ? (
               <>
                 {isAdmin && (
                   <Link href="/admin" style={{ padding: '8px 14px', borderRadius: 10, background: 'var(--clr-primary)', color: '#fff', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>Admin Panel</Link>
@@ -324,7 +358,7 @@ export default function Navbar() {
                   <LogOut size={14} /> Logout
                 </button>
               </>
-            ) : mounted ? (
+            ) : authReady ? (
               <>
                 <Link href="/login" style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid var(--bd)', background: 'transparent', color: 'var(--fg)', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>Login</Link>
                 <Link href="/register" style={{ padding: '8px 16px', borderRadius: 10, background: 'var(--clr-primary)', color: '#fff', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>Sign Up</Link>
