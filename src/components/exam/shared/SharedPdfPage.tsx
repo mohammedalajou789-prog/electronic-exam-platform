@@ -4,6 +4,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { ExplanationRenderer } from '@/components/exam/ExplanationRenderer'
+import { loadCustomExam, inExamOrder } from '@/features/exam-engine/custom-exam'
 
 interface Question {
   id: string
@@ -112,13 +113,11 @@ export default function SharedPdfPage({ examId, customExamId }: Props) {
 
     } else if (customExamId) {
       // ── Custom exam ───────────────────────────────────────
-      const { data: customExam } = await supabase
-        .from('custom_exams')
-        .select('*')
-        .eq('id', customExamId)
-        .single()
+      // By its name in the link (a student's own exam) or by id (a guest's exam)
+      const customExam = await loadCustomExam(supabase, customExamId)
 
       if (!customExam) { setLoading(false); return }
+      if (customExam.name) setExamInfo(info => ({ ...info, title: customExam.name ?? info.title }))
 
       const { data: rows } = await supabase
         .from('questions')
@@ -133,7 +132,7 @@ export default function SharedPdfPage({ examId, customExamId }: Props) {
         .is('deleted_at', null)
 
       if (rows) {
-        setQuestions(rows.map((r: any) => ({
+        setQuestions(inExamOrder(rows as { id: string }[], customExam.question_ids).map((r: any) => ({
           ...r,
           chapter: Array.isArray(r.chapter) ? r.chapter[0] || null : r.chapter,
           lecture: Array.isArray(r.lecture) ? r.lecture[0] || null : r.lecture,

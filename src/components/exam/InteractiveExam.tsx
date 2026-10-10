@@ -860,7 +860,7 @@ export default function InteractiveExam({
               className="press"
             >
               <BackArrow />
-              {isCustomExam ? 'Exit' : 'Continue Later'}
+              Continue Later
             </button>
 
             <button

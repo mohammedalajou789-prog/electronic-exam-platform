@@ -382,7 +382,8 @@ export default function CustomExamBuilder({ subjectId, batches, options, basePat
         setIsGenerating(false)
         return
       }
-      router.push(`${basePath}/custom/${data.id}`)
+      // A student's exam opens by its name; a guest's temporary exam by its id
+      router.push(`${basePath}/custom/${data.slug ?? data.id}`)
     } catch {
       setError('Something went wrong. Please try again.')
       setIsGenerating(false)

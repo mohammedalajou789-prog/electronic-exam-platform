@@ -5,9 +5,10 @@
 // have solved, skipped or not solved yet). Everything is fetched in parallel.
 
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { resumeIndex } from '@/features/exam-engine/resume-position'
+import { loadCustomExam, type CustomExamRow } from '@/features/exam-engine/custom-exam'
 import {
   Clock, Play, Eye, Download,
   RotateCcw, ArrowRight, ChevronRight, Check, CircleDashed,
@@ -130,6 +131,10 @@ const PREP_CSS = `
   .pp-title { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
   .pp-eyebrow { display: inline-flex; align-items: center; gap: 10px; font-size: 12.5px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--clr-primary); }
   .pp-eyebrow::before { content: ''; width: 22px; height: 2px; border-radius: 2px; background: currentColor; }
+  /* Filters a custom exam was made with */
+  .pp-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pp-filter { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: var(--bg-soft); border: 1px solid var(--bd); color: var(--fg); }
+  .pp-filter-date { color: var(--fg-muted); }
   .pp-h1 { margin: 0; font-size: clamp(34px, 5.4vw, 60px); line-height: 1; font-weight: 800; letter-spacing: -0.045em; overflow-wrap: anywhere; }
 
   .pp-by { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
@@ -346,6 +351,98 @@ async function loadStudentData(
   }
 }
 
+/**
+ * The logged-in student's data for a custom exam: the open attempt (Continue box)
+ * and the solved / skipped / not solved split of its questions.
+ * `activeIds` are the exam's questions that still exist, in the order they are shown.
+ */
+async function loadCustomStudentData(
+  supabase: ServerSupabaseClient,
+  customExamId: string,
+  activeIds: string[]
+): Promise<StudentData> {
+  const { data: claimsData } = await supabase.auth.getClaims()
+  const userId = typeof claimsData?.claims?.sub === 'string' ? claimsData.claims.sub : null
+  if (!userId || activeIds.length === 0) return { savedProgress: null, examProgress: null }
+
+  const [attemptRes, progressRes] = await Promise.all([
+    supabase
+      .from('exam_attempts')
+      .select('current_index, time_spent, total_questions, question_ids, attempt_answers(question_id)')
+      .eq('user_id', userId)
+      .eq('custom_exam_id', customExamId)
+      .eq('status', 'in_progress')
+      .not('attempt_answers.chosen_answer', 'is', null)
+      .maybeSingle(),
+    // A custom exam has at most 200 questions, so this stays under the 1000-row limit
+    supabase
+      .from('user_question_progress')
+      .select('status')
+      .eq('user_id', userId)
+      .in('question_id', activeIds),
+  ])
+
+  if (attemptRes.error) console.error('[SharedExamPrepPage] Open custom attempt query failed:', attemptRes.error.message)
+  if (progressRes.error) console.error('[SharedExamPrepPage] Custom exam progress query failed:', progressRes.error.message)
+
+  const attempt = attemptRes.data as unknown as OpenAttemptRow | null
+  const answered = new Set((attempt?.attempt_answers ?? []).map(a => a.question_id))
+
+  let savedProgress: SavedProgress | null = null
+  if (attempt && answered.size > 0) {
+    savedProgress = {
+      answeredCount: answered.size,
+      totalQuestions: attempt.total_questions,
+      nextQuestion: resumeIndex(activeIds, id => answered.has(id), attempt.current_index ?? 0) + 1,
+      elapsedSeconds: attempt.time_spent ?? 0,
+      isPart: false,
+    }
+  }
+
+  const rows = (progressRes.data ?? []) as { status: string }[]
+  const solved = rows.filter(r => r.status === 'solved').length
+  const skipped = rows.filter(r => r.status === 'skipped').length
+  return {
+    savedProgress,
+    examProgress: { total: activeIds.length, solved, skipped, unsolved: activeIds.length - solved - skipped },
+  }
+}
+
+/** Short labels for the filters a custom exam was made with (names looked up in parallel) */
+async function describeFilters(supabase: ServerSupabaseClient, exam: CustomExamRow): Promise<string[]> {
+  const f = exam.filters ?? {}
+  const ids = (list: string[] | undefined): string[] => (Array.isArray(list) ? list : [])
+  const names = async (table: 'batches' | 'doctors' | 'chapters' | 'lectures', list: string[]): Promise<string[]> => {
+    if (list.length === 0) return []
+    const { data, error } = await supabase.from(table).select('name').in('id', list)
+    if (error) console.error(`[SharedExamPrepPage] ${table} names query failed:`, error.message)
+    return ((data ?? []) as { name: string }[]).map(r => r.name)
+  }
+  const [batches, doctors, chapters, lectures] = await Promise.all([
+    names('batches', ids(f.batch_ids)),
+    names('doctors', ids(f.doctor_ids)),
+    names('chapters', ids(f.chapter_ids)),
+    names('lectures', ids(f.lecture_ids)),
+  ])
+
+  const group = (word: string, list: string[]): string | null => {
+    if (list.length === 0) return null
+    if (list.length <= 2) return list.join(', ')
+    return `${list.length} ${word}`
+  }
+  return [
+    f.not_answered && f.first_wrong ? 'Not answered yet or wrong on first try'
+      : f.not_answered ? 'Not answered yet'
+      : f.first_wrong ? 'Wrong on first try'
+      : null,
+    group('batches', batches),
+    group('doctors', doctors),
+    group('chapters', chapters),
+    group('lectures', lectures),
+    f.randomize ? 'Shuffled' : null,
+  ].filter((x): x is string => !!x)
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default async function SharedExamPrepPage({
@@ -365,6 +462,8 @@ export default async function SharedExamPrepPage({
   let chapters: string[] = []
   let savedProgress: SavedProgress | null = null
   let examProgress: ExamProgress | null = null
+  let customFilters: string[] = []
+  let customCreated: string | null = null
 
   if (examId) {
     // These three don't depend on each other, so they run at the same time:
@@ -412,30 +511,43 @@ export default async function SharedExamPrepPage({
     examProgress = studentData.examProgress
 
   } else if (customExamId) {
-    const { data: customExam } = await supabase
-      .from('custom_exams')
-      .select('*')
-      .eq('id', customExamId)
-      .single()
-
+    const customExam = await loadCustomExam(supabase, customExamId)
     if (!customExam) notFound()
 
-    questionCount = customExam.question_count
+    // A named exam always uses its name in the link
+    if (customExam.slug && customExamId !== customExam.slug) {
+      redirect(basePath.replace(/\/[^/]+$/, `/${customExam.slug}`))
+    }
 
-    const { data: qData } = await supabase
-      .from('questions')
-      .select('chapter:chapters(id, name)')
-      .in('id', customExam.question_ids)
-      .is('deleted_at', null)
+    const [qRes, filterLabels] = await Promise.all([
+      supabase
+        .from('questions')
+        .select('id, chapter:chapters(id, name)')
+        .in('id', customExam.question_ids)
+        .is('deleted_at', null),
+      describeFilters(supabase, customExam),
+    ])
+    const qData = (qRes.data ?? []) as unknown as { id: string; chapter: { name: string } | { name: string }[] | null }[]
+    if (qData.length === 0) notFound()
 
-    if (!qData || qData.length === 0) notFound()
+    title = customExam.name ?? 'Custom Exam'
+    customFilters = filterLabels
+    customCreated = customExam.created_at
+
+    const active = new Set(qData.map(q => q.id))
+    const activeIds = customExam.question_ids.filter(id => active.has(id))
+    questionCount = activeIds.length
 
     const chapterNames2 = new Set<string>()
-    ;(qData || []).forEach((q: any) => {
+    qData.forEach(q => {
       const ch = Array.isArray(q.chapter) ? q.chapter[0] : q.chapter
       if (ch?.name) chapterNames2.add(ch.name)
     })
     chapters = Array.from(chapterNames2)
+
+    const studentData = await loadCustomStudentData(supabase, customExam.id, activeIds)
+    savedProgress = studentData.savedProgress
+    examProgress = studentData.examProgress
   }
 
   // ── Derived values ─────────────────────────────────────────
@@ -456,7 +568,8 @@ export default async function SharedExamPrepPage({
   const splitPct = (n: number): number =>
     examProgress && examProgress.total > 0 ? (n / examProgress.total) * 100 : 0
   // Offered only when it differs from starting the whole exam
-  const showUnansweredButton = !!examProgress && examProgress.solved > 0 && unansweredCount > 0
+  // (Not for custom exams: their list of questions is fixed)
+  const showUnansweredButton = !isCustom && !!examProgress && examProgress.solved > 0 && unansweredCount > 0
 
   const badgeLabel = isCustom
     ? 'Custom exam'
@@ -508,6 +621,17 @@ export default async function SharedExamPrepPage({
             <div className="pp-title">
               {badgeLabel && <span className="pp-eyebrow a-rise">{badgeLabel}</span>}
               <h1 className="pp-h1 a-rise" style={stagger(1)}>{title}</h1>
+
+              {isCustom && (customFilters.length > 0 || customCreated) && (
+                <div className="pp-filters a-rise" style={stagger(2)}>
+                  {customFilters.map(label => <span key={label} className="pp-filter">{label}</span>)}
+                  {customCreated && (
+                    <span className="pp-filter pp-filter-date">
+                      Created {new Date(customCreated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </span>
+                  )}
+                </div>
+              )}
 
               {doctors.length > 0 && (
                 <div className="pp-by a-rise" style={stagger(2)}>
@@ -666,12 +790,10 @@ export default async function SharedExamPrepPage({
                 <CircleDashed size={15} />Solve unanswered ({unansweredCount})
               </Link>
             )}
-            {!isCustom && (
-              <span className="pp-note">
-                <Check size={13} />
-                Progress saves automatically
-              </span>
-            )}
+            <span className="pp-note">
+              <Check size={13} />
+              Progress saves automatically
+            </span>
           </div>
         </div>
 

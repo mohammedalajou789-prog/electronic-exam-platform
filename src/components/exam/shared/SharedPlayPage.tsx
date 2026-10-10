@@ -7,6 +7,7 @@
 import { notFound } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import InteractiveExam from '@/components/exam/InteractiveExam'
+import { loadCustomExam, inExamOrder } from '@/features/exam-engine/custom-exam'
 
 /** Progress handed to the exam screen when the student resumes */
 interface ResumeProgress {
@@ -51,7 +52,7 @@ async function currentUserId(supabase: ServerSupabaseClient): Promise<string | n
  */
 async function loadResumeProgress(
   supabase: ServerSupabaseClient,
-  examId: string
+  target: { column: 'exam_id' | 'custom_exam_id'; id: string }
 ): Promise<ResumeProgress | null> {
   const userId = await currentUserId(supabase)
   if (!userId) return null
@@ -60,7 +61,7 @@ async function loadResumeProgress(
     .from('exam_attempts')
     .select('current_index, viewed_ids, flagged_ids, time_spent, question_ids, attempt_answers(question_id, chosen_answer)')
     .eq('user_id', userId)
-    .eq('exam_id', examId)
+    .eq(target.column, target.id)
     .eq('status', 'in_progress')
     .not('attempt_answers.chosen_answer', 'is', null)
     .maybeSingle()
@@ -116,25 +117,27 @@ export default async function SharedPlayPage({ examId, customExamId, resume, set
 
   // ── Custom Exam ───────────────────────────────────────────
   if (customExamId) {
-    const { data: customExam } = await supabase
-      .from('custom_exams')
-      .select('*')
-      .eq('id', customExamId)
-      .single()
-
+    // By its name in the link (a student's own exam) or by id (a guest's exam)
+    const customExam = await loadCustomExam(supabase, customExamId)
     if (!customExam) notFound()
 
-    const { data: questions } = await supabase
-      .from('questions')
-      .select('*, question_images(*), question_statistics(*), chapter:chapters(id, name), lecture:lectures(id, name)')
-      .in('id', customExam.question_ids)
-      .is('deleted_at', null)
+    const isResume = resume === 'true'
+    const [questionsRes, resumeProgress] = await Promise.all([
+      supabase
+        .from('questions')
+        .select('*, question_images(*), question_statistics(*), chapter:chapters(id, name), lecture:lectures(id, name)')
+        .in('id', customExam.question_ids)
+        .is('deleted_at', null),
+      isResume ? loadResumeProgress(supabase, { column: 'custom_exam_id', id: customExam.id }) : Promise.resolve(null),
+    ])
 
-    if (!questions || questions.length === 0) notFound()
+    // Same order as when the exam was made (shuffled once, then fixed)
+    const questions = inExamOrder((questionsRes.data ?? []) as { id: string }[], customExam.question_ids)
+    if (questions.length === 0) notFound()
 
     const fakeExam = {
       id: customExam.id,
-      title: 'Custom Exam',
+      title: customExam.name ?? 'Custom Exam',
       question_count: questions.length,
       duration_minutes: null,
       timer_mode: 'none' as const,
@@ -144,9 +147,9 @@ export default async function SharedPlayPage({ examId, customExamId, resume, set
       <InteractiveExam
         exam={fakeExam as any}
         questions={questions as any}
-        savedProgress={null}
+        savedProgress={resumeProgress}
         target={{ examId: null, customExamId: customExam.id }}
-        resume={false}
+        resume={isResume}
       />
     )
   }
@@ -181,7 +184,7 @@ export default async function SharedPlayPage({ examId, customExamId, resume, set
       .eq('exam_id', examId)
       .is('deleted_at', null)
       .order('question_order', { ascending: true }),
-    isResume ? loadResumeProgress(supabase, examId) : Promise.resolve(null),
+    isResume ? loadResumeProgress(supabase, { column: 'exam_id', id: examId }) : Promise.resolve(null),
     wantsUnanswered ? loadUnansweredIds(supabase, examId) : Promise.resolve(null),
   ])
 

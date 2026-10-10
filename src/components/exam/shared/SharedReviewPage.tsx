@@ -11,6 +11,7 @@ import { isUuid } from '@/lib/uuid'
 import Link from 'next/link'
 import { BookOpen } from 'lucide-react'
 import ReviewQuestion from '@/components/exam/ReviewQuestion'
+import { loadCustomExam, inExamOrder } from '@/features/exam-engine/custom-exam'
 
 interface Props {
   examId?: string
@@ -44,18 +45,15 @@ export default async function SharedReviewPage({
     questions = data || []
   } else if (customExamId) {
     const supabase = await createServerSupabaseClient()
-    const { data: customExam } = await supabase
-      .from('custom_exams')
-      .select('question_ids')
-      .eq('id', customExamId)
-      .single()
+    // By its name in the link (a student's own exam) or by id (a guest's exam)
+    const customExam = await loadCustomExam(supabase, customExamId)
     if (!customExam) notFound()
     const { data } = await supabase
       .from('questions')
       .select('*, question_statistics(*), chapter:chapters(id, name), lecture:lectures(id, name)')
       .in('id', customExam.question_ids)
       .is('deleted_at', null)
-    questions = data || []
+    questions = inExamOrder((data ?? []) as { id: string }[], customExam.question_ids)
   }
 
   if (questions.length === 0) notFound()
