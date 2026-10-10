@@ -1,7 +1,7 @@
 // src/features/exam-engine/attempt-client.ts
 //
 // The only place where the exam screen talks to the attempt functions
-// in the database (start, record answer, save progress, finish, abandon).
+// in the database (start, record answer, save progress, finish).
 //
 // All grading happens in the database. The browser only sends what the
 // student chose; it never decides whether an answer is correct.
@@ -226,19 +226,4 @@ export async function finishAttempt(
     timeSpentSeconds: result.time_spent,
     examUnanswered: result.exam_unanswered ?? null,
   }
-}
-
-/**
- * Marks the open attempt as abandoned ("End Session").
- * Answers already given still count in the student's statistics.
- */
-export async function abandonAttempt(target: ExamTarget): Promise<void> {
-  const supabase = createClient()
-  await withRetry(async () => {
-    const { error } = await supabase.rpc('abandon_exam_attempt', {
-      p_exam_id: target.examId,
-      p_custom_exam_id: target.customExamId,
-    })
-    if (error) throw new Error(error.message)
-  })
 }

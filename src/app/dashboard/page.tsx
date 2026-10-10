@@ -36,18 +36,10 @@ interface StudyStats {
   by_subject: SubjectStats[]
 }
 
-/** get_my_wrong_overview: the wrong-questions list, counted in the database */
+/** get_my_wrong_overview: the wrong-questions list, counted in the database (only the part used here) */
 interface WrongOverview {
   total: number
   by_subject: { subject_id: string; subject: string; count: number }[]
-  by_chapter: {
-    chapter_id: string
-    chapter: string
-    subject_id: string
-    subject: string
-    count: number
-    lectures: { lecture_id: string; lecture: string; count: number }[]
-  }[]
 }
 
 /** An open (unfinished) attempt at a regular or custom exam, for "Continue studying" */
@@ -425,8 +417,6 @@ export default async function DashboardPage() {
           padding: 3px 4px 3px 0; margin: -3px -4px -3px 0;
         }
         .dash-scroll::-webkit-scrollbar { display: none; }
-        .dash-item { transition: border-color var(--dur-2), transform var(--dur-2) var(--ease-out), background-color var(--dur-2); }
-        .dash-item:hover { border-color: var(--bd-strong); transform: translateY(-2px); }
         .dash-bar-link { transition: border-color var(--dur-2), transform var(--dur-2) var(--ease-out); }
         .dash-bar-link:hover { border-color: var(--bd-strong); transform: translateX(3px); }
 
@@ -489,7 +479,6 @@ export default async function DashboardPage() {
           .dash-cs-text { grid-column: 1 / -1; }
         }
 
-        .dash-item { padding: 16px 18px; border-radius: 14px; background: var(--bg-soft); border: 1px solid var(--bd); }
         .dash-track { height: 6px; border-radius: 999px; background: var(--track); overflow: hidden; }
         .dash-track-fill { height: 100%; border-radius: 999px; }
 

@@ -1,6 +1,7 @@
 -- supabase/sql/checks/question_progress_health.sql
 --
--- Read-only health check of the question progress system (after phase 4 cleanup).
+-- Read-only health check of the question progress system (after phase 4 cleanup)
+-- and of the custom exams (rows 24-30, added 10 Oct 2026).
 -- Run in: Supabase -> SQL Editor -> New query -> Run
 -- Every row: what is checked, the real value, the expected value, OK or FAIL.
 -- Rows 9-16 compare user_question_progress with the answer log (attempt_answers),
@@ -141,6 +142,39 @@ checks(n, item, value, expected) as (
             select user_id, exam_id from exam_attempts
             where status = 'in_progress' and exam_id is not null
             group by 1, 2 having count(*) > 1) x), '0'
+  -- -- Custom exams (10 Oct 2026) --
+  union all
+  select 24, 'custom exams: owner, name and link name do not go together',
+         (select count(*)::text from custom_exams
+          where not ((user_id is null and name is null and slug is null)
+                  or (user_id is not null and name is not null and slug is not null))), '0'
+  union all
+  select 25, 'custom exams: students can write the table directly',
+         (has_table_privilege('anon', 'public.custom_exams', 'insert, update, delete')
+          or has_table_privilege('authenticated', 'public.custom_exams', 'insert, update, delete'))::text, 'false'
+  union all
+  select 26, 'custom exams: one student has two exams with the same link name',
+         (select count(*)::text from (
+            select user_id, slug from custom_exams where user_id is not null
+            group by 1, 2 having count(*) > 1) x), '0'
+  union all
+  select 27, 'open attempts without an exam',
+         (select count(*)::text from exam_attempts
+          where status = 'in_progress' and exam_id is null and custom_exam_id is null), '0'
+  union all
+  select 28, 'more than one open attempt for the same custom exam',
+         (select count(*)::text from (
+            select user_id, custom_exam_id from exam_attempts
+            where status = 'in_progress' and custom_exam_id is not null
+            group by 1, 2 having count(*) > 1) x), '0'
+  union all
+  select 29, 'old functions pick_custom_exam_questions / abandon_exam_attempt removed',
+         (to_regprocedure('public.pick_custom_exam_questions(uuid[], uuid[], uuid[], integer, boolean)') is null
+          and to_regprocedure('public.abandon_exam_attempt(uuid, uuid)') is null)::text, 'true'
+  union all
+  select 30, 'info: custom exams of students / of guests',
+         (select count(*) filter (where user_id is not null) || ' / ' || count(*) filter (where user_id is null)
+          from custom_exams), '-'
   -- -- Information only --
   union all
   select 22, 'info: progress rows solved / skipped / in wrong list',
