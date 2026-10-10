@@ -15,7 +15,6 @@ import {
   type AnswerPayload,
 } from '@/features/exam-engine/attempt-client'
 import { resumeIndex } from '@/features/exam-engine/resume-position'
-import { refreshStudyTip } from '@/app/actions/compute-study-tip'
 import {
   REPORT_CATEGORIES,
   MAX_REPORT_DESCRIPTION_LENGTH,
@@ -446,14 +445,20 @@ export default function InteractiveExam({
     if (mode === 'play' && shownQuestion) viewedRef.current.add(shownQuestion.id)
   }, [current, mode, questions])
 
-  /** Refreshes the study tip for a regular exam (never blocks the student). */
-  async function refreshTipSafely(): Promise<void> {
+  /**
+   * Refreshes the study tip for a regular exam (never blocks the student).
+   * A plain request, not a Server Action: the router waits for a pending Server Action
+   * before it changes page, so "Back to exam page" right after Finish used to wait for it.
+   * keepalive lets the request finish even when the student leaves the page at once.
+   */
+  function refreshTipInBackground(): void {
     if (!targetExamId || !userIdRef.current) return
-    try {
-      await refreshStudyTip(targetExamId)
-    } catch (err) {
-      console.error('Could not update study tip:', err)
-    }
+    fetch('/api/study-tip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ examId: targetExamId }),
+      keepalive: true,
+    }).catch(err => console.error('Could not update study tip:', err))
   }
 
   /** Starts a brand-new attempt (Restart / Retake). The old one is abandoned. */
@@ -548,6 +553,16 @@ export default function InteractiveExam({
     }
   }, [])
 
+  // ── Leaving the exam screen ───────────────────────────────────────────────
+  /**
+   * Goes back to the exam page without reloading the whole site.
+   * replace(): the browser's Back button does not return to the exam screen.
+   * The exam page is not cached, so it is rendered again with the latest progress.
+   */
+  function leaveToPrepPage(): void {
+    router.replace(prepPath)
+  }
+
   // ── "Continue Later" ──────────────────────────────────────────────────────
   /**
    * Saves the current progress on the attempt, then navigates back.
@@ -561,14 +576,16 @@ export default function InteractiveExam({
       console.error('Could not save progress before leaving:', err)
     }
 
-    // Most students leave without finishing, so the study tip is refreshed here too
-    await refreshTipSafely()
-
     // Stop timer and auto-save
     if (timerRef.current) clearInterval(timerRef.current)
     if (autoSaveRef.current) clearInterval(autoSaveRef.current)
 
-    window.location.replace(prepPath)
+    // Most students leave without finishing, so the study tip is refreshed here too.
+    // It is not awaited: the server finishes it while the student is already on the
+    // exam page (the tip is only shown on the dashboard).
+    refreshTipInBackground()
+
+    leaveToPrepPage()
   }
 
   // ── Finish exam ───────────────────────────────────────────────────────────
@@ -601,7 +618,7 @@ export default function InteractiveExam({
       setExamUnanswered(isCustomExam ? null : summary.examUnanswered)
 
       // Study tips are refreshed for regular exams (never blocks the result)
-      void refreshTipSafely()
+      refreshTipInBackground()
     } catch (err) {
       console.error('Failed to save exam results:', err)
       setSaveError(true)
@@ -1006,7 +1023,7 @@ export default function InteractiveExam({
               fontSize: 14,
               cursor: 'pointer',
             }}
-            onClick={() => window.location.replace(prepPath)}
+            onClick={leaveToPrepPage}
           >
             Back to Exam
           </button>
@@ -2123,8 +2140,9 @@ export default function InteractiveExam({
         onRetrySave={() => { void saveResults(finalTimeTaken) }}
         onReview={() => setMode('review')}
         onRetake={retake}
+        // A full load on purpose: the same exam screen must start again from a clean state
         onSolveUnanswered={() => window.location.replace(`${prepPath}/play?set=unanswered`)}
-        onExit={() => window.location.replace(prepPath)}
+        onExit={leaveToPrepPage}
       />
     )
   }
