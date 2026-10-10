@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import EndSessionButton from '@/components/dashboard/EndSessionButton'
 import EndAllSessionsButton from '@/components/dashboard/EndAllSessionsButton'
+import DeleteCustomExamButton from '@/components/dashboard/DeleteCustomExamButton'
 import StatInfo from '@/components/dashboard/StatInfo'
 import ReportsButton, { type DashboardReport } from '@/components/dashboard/ReportsButton'
 import SubjectProgressList from '@/components/dashboard/SubjectProgressList'
@@ -49,10 +50,11 @@ interface WrongOverview {
   }[]
 }
 
-/** An open (unfinished) attempt at a regular exam, for "Continue studying" */
+/** An open (unfinished) attempt at a regular or custom exam, for "Continue studying" */
 interface OpenAttemptRow {
   id: string
-  exam_id: string
+  exam_id: string | null
+  custom_exam_id: string | null
   started_at: string
   total_questions: number
   attempt_answers: { question_id: string; answered_at: string }[] | null
@@ -62,11 +64,33 @@ interface OpenAttemptRow {
     batch: { name: string } | null
     subject: { name: string } | null
   } | null
+  custom: {
+    id: string
+    name: string | null
+    subject: { name: string } | null
+  } | null
+}
+
+/** One of the student's own custom exams ("My custom exams") */
+interface MyCustomExamRow {
+  id: string
+  name: string
+  question_count: number
+  created_at: string
+  subject: { name: string } | null
+}
+
+/** A finished attempt at a custom exam (for the last score) */
+interface CustomResultRow {
+  custom_exam_id: string
+  score: number
+  completed_at: string
 }
 
 interface OpenAttempt {
   id: string
-  examId: string
+  /** Where "Continue" goes */
+  continueHref: string
   title: string
   subjectName: string
   batchName: string
@@ -102,6 +126,8 @@ async function getDashboardData(userId: string) {
     { data: bookmarksRaw },
     { data: recentReports },
     { data: studyTipsRaw },
+    { data: myCustomRaw },
+    { data: customResultsRaw },
   ] = await Promise.all([
     supabase.from('users').select('display_name').eq('id', userId).single(),
 
@@ -111,17 +137,21 @@ async function getDashboardData(userId: string) {
     supabase
       .from('exam_attempts')
       .select(`
-        id, exam_id, started_at, total_questions,
+        id, exam_id, custom_exam_id, started_at, total_questions,
         attempt_answers(question_id, answered_at),
         exam:exams(
           id, title,
           batch:batches(name),
           subject:subjects(name)
+        ),
+        custom:custom_exams(
+          id, name,
+          subject:subjects(name)
         )
       `)
       .eq('user_id', userId)
       .eq('status', 'in_progress')
-      .not('exam_id', 'is', null)
+      .or('exam_id.not.is.null,custom_exam_id.not.is.null')
       .not('attempt_answers.chosen_answer', 'is', null),
 
     // Wrong-questions counts (by subject and chapter), computed in the database
@@ -157,6 +187,24 @@ async function getDashboardData(userId: string) {
       .is('dismissed_at', null)
       .gt('expires_at', new Date().toISOString())
       .order('created_at', { ascending: false }),
+
+    // The student's own custom exams (the database only returns their own)
+    supabase
+      .from('custom_exams')
+      .select('id, name, question_count, created_at, subject:subjects(name)')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(200),
+
+    // Their latest finished attempts at custom exams (for the last score)
+    supabase
+      .from('exam_attempts')
+      .select('custom_exam_id, score, completed_at')
+      .eq('user_id', userId)
+      .eq('status', 'completed')
+      .not('custom_exam_id', 'is', null)
+      .order('completed_at', { ascending: false })
+      .limit(500),
   ])
 
   const stats = (statsRaw as StudyStats | null) ?? null
@@ -171,12 +219,15 @@ async function getDashboardData(userId: string) {
         (latest, ans) => (ans.answered_at > latest ? ans.answered_at : latest),
         a.started_at
       )
+      const isCustom = a.custom_exam_id !== null
       return {
         id: a.id,
-        examId: a.exam_id,
-        title: a.exam?.title ?? 'Exam',
-        subjectName: a.exam?.subject?.name ?? '',
-        batchName: a.exam?.batch?.name ?? '',
+        continueHref: isCustom
+          ? `/dashboard/custom/${a.custom_exam_id}?resume=true`
+          : `/dashboard/resume/${a.exam_id}`,
+        title: isCustom ? (a.custom?.name ?? 'Custom Exam') : (a.exam?.title ?? 'Exam'),
+        subjectName: (isCustom ? a.custom?.subject?.name : a.exam?.subject?.name) ?? '',
+        batchName: isCustom ? 'Custom exam' : (a.exam?.batch?.name ?? ''),
         answered: answers.length,
         total: a.total_questions,
         lastActivity,
@@ -208,10 +259,29 @@ async function getDashboardData(userId: string) {
     bookmarksBySubject[subj].count++
   }
 
+  // ── My custom exams, with an open attempt or the last score ───────────────
+  const openCustom = new Set(
+    ((attemptsRaw ?? []) as unknown as OpenAttemptRow[]).map(a => a.custom_exam_id).filter(Boolean)
+  )
+  const lastScore = new Map<string, number>()
+  for (const r of (customResultsRaw ?? []) as CustomResultRow[]) {
+    if (!lastScore.has(r.custom_exam_id)) lastScore.set(r.custom_exam_id, r.score)
+  }
+  const myCustomExams = ((myCustomRaw ?? []) as unknown as MyCustomExamRow[]).map(c => ({
+    id: c.id,
+    name: c.name,
+    subjectName: c.subject?.name ?? '',
+    questionCount: c.question_count,
+    createdAt: c.created_at,
+    inProgress: openCustom.has(c.id),
+    lastScore: lastScore.get(c.id) ?? null,
+  }))
+
   return {
     user,
     stats,
     progress,
+    myCustomExams,
     subjectChart,
     wrongBySubject,
     totalWrong: wrong?.total ?? 0,
@@ -236,6 +306,10 @@ function timeAgo(iso: string): string {
   if (days < 30) return `${days} days ago`
   const months = Math.floor(days / 30)
   return `${months} month${months === 1 ? '' : 's'} ago`
+}
+
+function formatShortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 /** Stagger index for the shared animation classes in globals.css */
@@ -265,6 +339,7 @@ export default async function DashboardPage() {
     totalBookmarks,
     recentReports,
     studyTips,
+    myCustomExams,
   } = await getDashboardData(user.id)
 
   const answered = stats?.questions_solved ?? 0
@@ -290,7 +365,7 @@ export default async function DashboardPage() {
     : accuracy >= 70 ? 'Good standing' : accuracy >= 40 ? 'Keep pushing' : 'Needs work'
   const wrongRanked = withShare(wrongBySubject)
   const bookmarksRanked = withShare(bookmarksBySubject)
-  const resumeHref = progress.length > 0 ? `/dashboard/resume/${progress[0].examId}` : '#continue'
+  const resumeHref = progress.length > 0 ? progress[0].continueHref : '#continue'
 
   return (
     <div className="dash-root">
@@ -400,6 +475,14 @@ export default async function DashboardPage() {
           display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 9px;
           background: var(--clr-primary); color: #fff; font-size: 12.5px; font-weight: 700; text-decoration: none;
         }
+        /* My custom exams */
+        .dash-ce { grid-template-columns: minmax(0, 1fr) auto auto; }
+        .dash-ce-link { text-decoration: none; color: inherit; }
+        .dash-ce-link:hover .dash-cs-title { color: var(--clr-primary); }
+        .dash-ce-tag { font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: var(--bg-elev); border: 1px solid var(--bd); color: var(--fg-muted); white-space: nowrap; }
+        .dash-ce-tag-open { background: var(--clr-soft); border-color: transparent; color: var(--clr-primary); }
+        .dash-ce-tag-new { color: var(--fg-faint); }
+
         @media (max-width: 640px) {
           /* Phone: the name on its own line, progress and buttons below it */
           .dash-cs { grid-template-columns: minmax(0, 1fr) auto; row-gap: 10px; }
@@ -639,7 +722,7 @@ export default async function DashboardPage() {
                         </span>
                       </div>
                       <div className="dash-cs-actions">
-                        <Link href={`/dashboard/resume/${p.examId}`} className="dash-cs-go press">
+                        <Link href={p.continueHref} className="dash-cs-go press">
                           <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21" /></svg>
                           Continue
                         </Link>
@@ -677,6 +760,44 @@ export default async function DashboardPage() {
             )}
           </section>
         </div>
+
+        {/* ── My custom exams ──────────────────────────────────────────────── */}
+        <section id="custom-exams" className="dash-card a-rise" style={stagger(7)}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <h2 className="dash-h2">My custom exams</h2>
+              <span className="dash-pill">{myCustomExams.length}</span>
+            </div>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-muted)' }}>Build one from any subject page</span>
+          </div>
+          {myCustomExams.length === 0 ? (
+            <div className="dash-empty">You have no custom exams yet. Open a subject and choose &quot;Build your own exam&quot;.</div>
+          ) : (
+            <div className="dash-scroll" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 440px), 1fr))', gap: 8, alignContent: 'start' }}>
+              {myCustomExams.map((c, i) => (
+                <div key={c.id} className="dash-cs dash-ce a-rise" style={stagger(Math.min(i, 8))}>
+                  <Link href={`/dashboard/custom/${c.id}`} className="dash-cs-text dash-ce-link">
+                    <span className="dash-cs-title">{c.name}</span>
+                    <span className="dash-cs-sub">
+                      {[c.subjectName, `${c.questionCount} question${c.questionCount === 1 ? '' : 's'}`, formatShortDate(c.createdAt)].filter(Boolean).join(' · ')}
+                    </span>
+                  </Link>
+                  {c.inProgress ? (
+                    <span className="dash-ce-tag dash-ce-tag-open">In progress</span>
+                  ) : c.lastScore !== null ? (
+                    <span className="dash-ce-tag" title="Score of your last finished attempt">Last {c.lastScore}%</span>
+                  ) : (
+                    <span className="dash-ce-tag dash-ce-tag-new">Not started</span>
+                  )}
+                  <div className="dash-cs-actions">
+                    <Link href={`/dashboard/custom/${c.id}`} className="dash-cs-go press">Open</Link>
+                    <DeleteCustomExamButton customExamId={c.id} name={c.name} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
         {/* ── Wrong + Bookmarks ────────────────────────────────────────────── */}
         <div className="dash-row-2">
