@@ -342,7 +342,10 @@ export default function InteractiveExam({
       resumeRef.current = true
 
       const promise = (async (): Promise<ExamSession> => {
-        const { data: { user } } = await supabase.auth.getUser()
+        // The session stored in this browser (no call to the Auth server, unlike getUser()).
+        // The database functions identify the student from the token themselves.
+        const { data: { session } } = await supabase.auth.getSession()
+        const user = session?.user ?? null
         userIdRef.current = user?.id ?? null
         if (!user) return { userId: null, attemptId: null }
 
@@ -368,13 +371,16 @@ export default function InteractiveExam({
     return sessionPromiseRef.current
   }, [supabase, targetExamId, targetCustomExamId, isUnansweredSet, questions])
 
-  // Open the attempt as soon as the exam screen loads, then show saved bookmarks
+  // Open the attempt as soon as the exam screen loads. The saved bookmarks load at the
+  // same time (they only need the student's id), not after the attempt has been opened.
   useEffect(() => {
     let cancelled = false
-    ensureSession()
-      .then(async session => {
-        if (!session.userId) return
-        const saved = await loadBookmarkedIds(session.userId, questions.map(q => q.id))
+    ensureSession().catch(err => console.error('Could not start the attempt:', err))
+    supabase.auth.getSession()
+      .then(async ({ data }) => {
+        const userId = data.session?.user.id
+        if (!userId) return
+        const saved = await loadBookmarkedIds(userId, questions.map(q => q.id))
         if (cancelled || saved.size === 0) return
         setBookmarked(current => {
           const merged = { ...current }
@@ -382,9 +388,9 @@ export default function InteractiveExam({
           return merged
         })
       })
-      .catch(err => console.error('Could not start the attempt:', err))
+      .catch(err => console.error('Could not load bookmarks:', err))
     return () => { cancelled = true }
-  }, [ensureSession, questions])
+  }, [ensureSession, questions, supabase])
 
   /** Shows a short message at the bottom of the screen for 3 seconds. */
   function showNotice(message: string): void {

@@ -218,8 +218,10 @@ export default async function WrongQuestionsPage({
   searchParams: Promise<{ subject?: string }>
 }) {
   const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  // getClaims() checks the session locally with the project's signing key (no Auth server call)
+  const { data: claimsData } = await supabase.auth.getClaims()
+  const userId = typeof claimsData?.claims?.sub === 'string' ? claimsData.claims.sub : null
+  if (!userId) redirect('/login')
 
   const activeSubject = (await searchParams).subject ?? null
 
@@ -243,7 +245,7 @@ export default async function WrongQuestionsPage({
         )
       )
     `)
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
     .eq('in_wrong_list', true)
     .order('last_answered_at', { ascending: false })
 
@@ -331,11 +333,13 @@ export default async function WrongQuestionsPage({
             <div className="rv-filter a-rise" style={stagger(2)}>
               <div className="rv-filter-head">
                 <span className="rv-filter-label"><SlidersHorizontal size={14} />Filter by subject</span>
-                {activeSubject && <Link href={basePath} className="rv-filter-clear">Clear filter</Link>}
+                {activeSubject && <Link prefetch={false} href={basePath} className="rv-filter-clear">Clear filter</Link>}
               </div>
               <div className="rv-rail-wrap">
                 <nav className="rv-rail" aria-label="Filter by subject">
+                  {/* The filters open this same dynamic page: a prefetch would only run it again */}
                   <Link
+                    prefetch={false}
                     href={basePath}
                     className="rv-tab press"
                     aria-current={!activeSubject ? 'page' : undefined}
@@ -345,6 +349,7 @@ export default async function WrongQuestionsPage({
                   </Link>
                   {subjectCounts.map((subj, i) => (
                     <Link
+                      prefetch={false}
                       key={subj.name}
                       href={`${basePath}?subject=${encodeURIComponent(subj.name)}`}
                       className="rv-tab press"

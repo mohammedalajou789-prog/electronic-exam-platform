@@ -131,8 +131,10 @@ export async function refreshStudyTip(examId: string): Promise<void> {
   if (!UUID_PATTERN.test(examId)) return
 
   const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return
+  // getClaims() checks the session locally with the project's signing key (no Auth server call)
+  const { data: claimsData } = await supabase.auth.getClaims()
+  const userId = typeof claimsData?.claims?.sub === 'string' ? claimsData.claims.sub : null
+  if (!userId) return
 
   // ── 1. Subject of this exam ───────────────────────────────────────────────
   const { data: exam } = await supabase
@@ -161,7 +163,7 @@ export async function refreshStudyTip(examId: string): Promise<void> {
   const { data: existingTip } = await supabase
     .from('study_tips')
     .select('id, questions_solved')
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
     .eq('subject_id', subject.id)
     .gte('session_start', tipData.session_start)
     .order('created_at', { ascending: false })
@@ -195,7 +197,7 @@ export async function refreshStudyTip(examId: string): Promise<void> {
     const { error: insertError } = await supabase
       .from('study_tips')
       .insert({
-        user_id: user.id,
+        user_id: userId,
         subject_id: subject.id,
         subject_name: subject.name,
         message,

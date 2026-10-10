@@ -58,7 +58,7 @@ export default async function SearchPage({ searchParams }: PageProps) {
 
     supabase
       .from('subjects')
-      .select('id, name, semester_id, academic_year_id')
+      .select('id, name, semester_id, academic_year_id, year_id')
       .order('display_order', { ascending: true }),
 
     // Which batches each subject is shown to
@@ -76,6 +76,12 @@ export default async function SearchPage({ searchParams }: PageProps) {
     initialSearch,
   ])
 
+  // The year of each subject: clinical subjects have year_id, pre-clinical subjects
+  // belong to a year through their semester (subjects.academic_year_id may be empty)
+  const yearOfSemester = new Map((semesters ?? []).map(s => [s.id, s.academic_year_id]))
+  const subjectYear = (s: { semester_id: string | null; academic_year_id: string | null; year_id: string | null }): string | undefined =>
+    s.year_id ?? (s.semester_id ? yearOfSemester.get(s.semester_id) : undefined) ?? s.academic_year_id ?? undefined
+
   // One option per subject + batch link, newest graduation year first
   const batchOptions = ((batchLinks ?? []) as unknown as BatchLink[])
     .flatMap(link => (link.batch ? [{ ...link.batch, subject_id: link.subject_id }] : []))
@@ -88,7 +94,7 @@ export default async function SearchPage({ searchParams }: PageProps) {
       initialTotal={initialTotal}
       academicYears={(academicYears ?? []).map(y => ({ id: y.id, name: y.name }))}
       semesters={(semesters ?? []).map(s => ({ id: s.id, name: s.name, academic_year_id: s.academic_year_id }))}
-      subjects={(subjectsRaw ?? []).map(s => ({ id: s.id, name: s.name, semester_id: s.semester_id, academic_year_id: s.academic_year_id }))}
+      subjects={(subjectsRaw ?? []).map(s => ({ id: s.id, name: s.name, semester_id: s.semester_id, academic_year_id: subjectYear(s) }))}
       batches={batchOptions.map(b => ({ id: b.id, name: b.name, subject_id: b.subject_id, slug: b.slug }))}
       exams={((examsRaw ?? []) as unknown as ExamOption[]).map(e => ({ id: e.id, name: e.title, subject_id: e.subject_id, batch_slug: e.batches?.slug ?? null }))}
     />

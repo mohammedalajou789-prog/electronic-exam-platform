@@ -138,7 +138,8 @@ export default function AdminNavbar({ onToggleSidebar, sidebarCollapsed }: Props
 
         {/* Right: dark mode + student panel + logout */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Link href="/" className="adm-topbar-studentbtn">
+          {/* An admin is signed in, so '/' would only send them on to /dashboard */}
+          <Link href="/dashboard" className="adm-topbar-studentbtn">
             Student Panel
           </Link>
 

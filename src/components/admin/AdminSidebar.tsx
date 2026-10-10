@@ -220,7 +220,10 @@ export default function AdminSidebar({ role, userName, userEmail, userBatch }: P
             }}
           >
             {navItems.map((item) => (
+              // prefetch={false}: admin pages are dynamic, so a prefetch only runs them (and the
+              // proxy's admin check) again without being reused when the link is clicked
               <Link
+                prefetch={false}
                 key={item.href}
                 href={item.href}
                 className={`adm-nav-link-new${isActive(item.href) ? ' active' : ''}`}
