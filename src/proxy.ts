@@ -43,7 +43,13 @@ export async function proxy(request: NextRequest) {
 
   // Logged-in students skip the public home page and go straight to their dashboard.
   // This check lives here (not in the home page) so the home page itself can be cached for guests.
-  if (pathname === '/' && userId) {
+  // Only for a full page load (the browser asks for HTML). A link click inside the site asks
+  // for the page's data instead, and the router did not always follow this redirect (the click
+  // seemed to do nothing). Those requests get the home page data, and SignedInRedirect (in the
+  // home page) moves the student on. Next.js hides its own 'rsc' header from the proxy, so the
+  // Accept header is what tells the two apart.
+  const isPageLoad = (request.headers.get('accept') ?? '').includes('text/html')
+  if (pathname === '/' && userId && isPageLoad) {
     return NextResponse.redirect(new URL('/dashboard', request.url))
   }
 

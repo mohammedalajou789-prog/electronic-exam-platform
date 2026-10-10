@@ -1,5 +1,6 @@
 import { createPublicSupabaseClient, assertQuerySucceeded } from '@/lib/supabase/public'
 import AcademicYearsSection from '@/components/shared/AcademicYearsSection'
+import SignedInRedirect from '@/components/shared/SignedInRedirect'
 import {
   ArrowRight, Play, Check, X, Bookmark, Lightbulb, RotateCcw, Shuffle, Target,
   FileDown, BarChart3, Zap, GraduationCap, ListChecks, Save, Eye,
@@ -308,7 +309,8 @@ const HOME_CSS = `
  * It is rebuilt at most every 5 minutes, so the numbers and years stay up to date within 5 minutes.
  *
  * Logged-in students never see this page: src/proxy.ts sends them to /dashboard
- * before this cached page is served. Never add user-specific data here.
+ * before this cached page is served, and SignedInRedirect does the same in the browser
+ * when the page comes from a cache (Back button, router cache). Never add user-specific data here.
  */
 export const revalidate = 300
 
@@ -338,6 +340,7 @@ export default async function HomePage() {
 
   return (
     <div className="hm">
+      <SignedInRedirect />
       {/* dangerouslySetInnerHTML keeps quotes and '>' in the CSS unescaped */}
       <style dangerouslySetInnerHTML={{ __html: HOME_CSS }} />
 
