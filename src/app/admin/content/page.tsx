@@ -388,17 +388,27 @@ export default function ContentManagementPage() {
 
     const examIds = exams.filter(e => e.subject_id === subject.id).map(e => e.id)
 
-    let usedCount = 0
+    // The doctor is still in use if linked to an exam of this subject, or tagged
+    // on one of its questions (exams have no doctor column; questions do)
     if (examIds.length > 0) {
-      const [{ count: directCount }, { count: linkCount }] = await Promise.all([
-        supabase.from('exams').select('id', { count: 'exact', head: true }).in('id', examIds).eq('doctor_id', link.doctor_id),
+      const [examLinks, taggedQuestions] = await Promise.all([
         supabase.from('exam_doctors').select('id', { count: 'exact', head: true }).in('exam_id', examIds).eq('doctor_id', link.doctor_id),
+        supabase.from('questions').select('id', { count: 'exact', head: true }).in('exam_id', examIds).eq('doctor_id', link.doctor_id),
       ])
-      usedCount = (directCount || 0) + (linkCount || 0)
-    }
-    if (usedCount > 0) {
-      showToast(`Cannot remove: this doctor is assigned to ${usedCount} exam(s) in this subject.`, 'error')
-      return
+      if (examLinks.error || taggedQuestions.error) {
+        showToast('Could not check whether this doctor is in use. Nothing was removed.', 'error')
+        return
+      }
+      const examCount = examLinks.count || 0
+      const questionCount = taggedQuestions.count || 0
+      if (examCount > 0 || questionCount > 0) {
+        const parts = [
+          examCount > 0 ? `${examCount} exam(s)` : '',
+          questionCount > 0 ? `${questionCount} question(s)` : '',
+        ].filter(Boolean).join(' and ')
+        showToast(`Cannot remove: this doctor is assigned to ${parts} in this subject.`, 'error')
+        return
+      }
     }
 
     const { error } = await supabase.from('subject_doctors').delete().eq('id', subjectDoctorId)

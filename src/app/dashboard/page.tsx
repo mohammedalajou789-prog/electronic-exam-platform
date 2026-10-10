@@ -42,6 +42,13 @@ interface WrongOverview {
   by_subject: { subject_id: string; subject: string; count: number }[]
 }
 
+/** get_my_bookmark_overview: the student's bookmarks, counted in the database */
+interface BookmarkOverview {
+  total: number
+  chapters: number
+  by_subject: { subject: string; count: number }[]
+}
+
 /** An open (unfinished) attempt at a regular or custom exam, for "Continue studying" */
 interface OpenAttemptRow {
   id: string
@@ -149,21 +156,8 @@ async function getDashboardData(userId: string) {
     // Wrong-questions counts (by subject and chapter), computed in the database
     supabase.rpc('get_my_wrong_overview'),
 
-    supabase
-      .from('bookmarks')
-      .select(`
-        id, question_id,
-        question:questions(
-          question_text,
-          chapter:chapters(name),
-          exam:exams(
-            title,
-            subject:subjects(name)
-          )
-        )
-      `)
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false }),
+    // Bookmark counts per subject, computed in the database
+    supabase.rpc('get_my_bookmark_overview'),
 
     supabase
       .from('reports')
@@ -243,13 +237,9 @@ async function getDashboardData(userId: string) {
   // ── Wrong answers grouped by subject ──────────────────────────────────────
   const wrongBySubject = (wrong?.by_subject ?? []).map(s => ({ subjectName: s.subject, count: s.count }))
 
-  // ── Bookmarks grouped by subject ──────────────────────────────────────────
-  const bookmarksBySubject: Record<string, { subjectName: string; count: number }> = {}
-  for (const b of bookmarksRaw ?? []) {
-    const subj = (b.question as any)?.exam?.subject?.name ?? 'Other'
-    if (!bookmarksBySubject[subj]) bookmarksBySubject[subj] = { subjectName: subj, count: 0 }
-    bookmarksBySubject[subj].count++
-  }
+  // ── Bookmarks grouped by subject (counted in the database) ────────────────
+  const bookmarkOverview = (bookmarksRaw as BookmarkOverview | null) ?? null
+  const bookmarksBySubject = (bookmarkOverview?.by_subject ?? []).map(s => ({ subjectName: s.subject, count: s.count }))
 
   // ── My custom exams, with an open attempt or the last score ───────────────
   const openCustom = new Set(
@@ -277,8 +267,8 @@ async function getDashboardData(userId: string) {
     subjectChart,
     wrongBySubject,
     totalWrong: wrong?.total ?? 0,
-    bookmarksBySubject: Object.values(bookmarksBySubject),
-    totalBookmarks: (bookmarksRaw ?? []).length,
+    bookmarksBySubject,
+    totalBookmarks: bookmarkOverview?.total ?? 0,
     recentReports: (recentReports ?? []) as DashboardReport[],
     studyTips: studyTipsRaw ?? [],
   }

@@ -36,20 +36,18 @@ export async function GET(req: NextRequest) {
       .ilike('name', pattern)
       .limit(3),
 
-    // 2. Chapters — from questions metadata
+    // 2. Chapters (fetch more: the same name can exist in several subjects)
     supabase
-      .from('questions')
-      .select('chapter')
-      .ilike('chapter', pattern)
-      .is('deleted_at', null)
-      .limit(20), // fetch more to deduplicate
+      .from('chapters')
+      .select('name')
+      .ilike('name', pattern)
+      .limit(20),
 
     // 3. Lectures
     supabase
-      .from('questions')
-      .select('lecture')
-      .ilike('lecture', pattern)
-      .is('deleted_at', null)
+      .from('lectures')
+      .select('name')
+      .ilike('name', pattern)
       .limit(20),
 
     // 4. Doctors
@@ -77,12 +75,12 @@ export async function GET(req: NextRequest) {
 
   // Deduplicate chapters and lectures
   const uniqueChapters = [...new Set(
-    (chapters ?? []).map((r: any) => r.chapter).filter(Boolean)
-  )].slice(0, 3) as string[]
+    (chapters ?? []).map(r => r.name).filter(Boolean)
+  )].slice(0, 3)
 
   const uniqueLectures = [...new Set(
-    (lectures ?? []).map((r: any) => r.lecture).filter(Boolean)
-  )].slice(0, 3) as string[]
+    (lectures ?? []).map(r => r.name).filter(Boolean)
+  )].slice(0, 3)
 
   // Build suggestions list in priority order
   const suggestions: { type: string; label: string; display?: string; icon: string }[] = []

@@ -12,6 +12,16 @@ const stagger = (i: number): React.CSSProperties =>
 /** Colour dot per subject in the filter */
 const TONES = ['var(--clr-primary)', 'var(--tone-blue-fg)', 'var(--tone-purple-fg)', 'var(--tone-green-fg)', 'var(--tone-amber-fg)']
 
+/** The list shows at most this many bookmarks (the newest first) */
+const LIST_LIMIT = 500
+
+/** get_my_bookmark_overview: the student's bookmarks, counted in the database */
+interface BookmarkOverview {
+  total: number
+  chapters: number
+  by_subject: { subject: string; count: number }[]
+}
+
 const REVIEW_CSS = `
   .rv { min-height: 100vh; background: var(--bg); color: var(--fg); font-family: "Plus Jakarta Sans", system-ui, sans-serif; }
   .rv-wrap { max-width: var(--page-max); margin: 0 auto; padding: 0 var(--page-pad); }
@@ -183,59 +193,59 @@ export default async function BookmarksPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: bookmarksRaw } = await supabase
+  const activeSubject = (await searchParams).subject ?? null
+
+  // The list and its counts load together. The subject filter and every count
+  // run in the database (no 1000-row limit on the counts).
+  let listQuery = supabase
     .from('bookmarks')
     .select(`
       id, question_id, created_at,
-      question:questions(
+      question:questions!inner(
         id, question_text, chapter_id, lecture_id, chapter:chapters(id, name), lecture:lectures(id, name),
         choice_a, choice_b, choice_c, choice_d, choice_e,
         correct_answer, explanation,
         incorrect_explanation_a, incorrect_explanation_b,
         incorrect_explanation_c, incorrect_explanation_d,
         incorrect_explanation_e,
-        exam:exams(
+        exam:exams!inner(
           id, title,
           batch:batches(name),
-          subject:subjects(name)
+          subject:subjects!inner(name)
         )
       )
     `)
     .eq('user_id', user.id)
+    .is('question.deleted_at', null)
     .order('created_at', { ascending: false })
+    .limit(LIST_LIMIT)
 
-  const bookmarks = bookmarksRaw ?? []
+  if (activeSubject) {
+    listQuery = listQuery.eq('question.exam.subject.name', activeSubject)
+  }
 
-  const subjects = [...new Set(
-    bookmarks
-      .map((b: any) => b.question?.exam?.subject?.name)
-      .filter(Boolean)
-  )] as string[]
+  const [listRes, overviewRes] = await Promise.all([
+    listQuery,
+    supabase.rpc('get_my_bookmark_overview'),
+  ])
+  if (listRes.error) console.error('[bookmarks] list query failed:', listRes.error.message)
+  if (overviewRes.error) console.error('[bookmarks] overview query failed:', overviewRes.error.message)
 
-  const activeSubject = (await searchParams).subject ?? null
-
-  const filtered = activeSubject
-    ? bookmarks.filter((b: any) => b.question?.exam?.subject?.name === activeSubject)
-    : bookmarks
+  const filtered = listRes.data ?? []
+  const overview = (overviewRes.data as BookmarkOverview | null) ?? { total: 0, chapters: 0, by_subject: [] }
 
   // ── Derived values for the layout ─────────────────────────
-  const subjectCounts = subjects
-    .map(subj => ({
-      name: subj,
-      count: bookmarks.filter((b: any) => b.question?.exam?.subject?.name === subj).length,
-    }))
-    .sort((a, b) => b.count - a.count)
-  const chapterCount = new Set(
-    bookmarks
-      .map((b: any) => {
-        const ch = b.question?.chapter
-        return Array.isArray(ch) ? ch[0]?.name : ch?.name
-      })
-      .filter(Boolean)
-  ).size
+  const totalSaved = overview.total
+  const subjectCounts = overview.by_subject.map(s => ({ name: s.subject, count: s.count }))
+  const subjectCount = subjectCounts.length
+  const chapterCount = overview.chapters
+  const activeTotal = activeSubject
+    ? (subjectCounts.find(s => s.name === activeSubject)?.count ?? 0)
+    : totalSaved
+
   const spec = [
-    { value: bookmarks.length.toLocaleString(), label: 'Saved' },
-    { value: String(subjects.length), label: subjects.length === 1 ? 'Subject' : 'Subjects' },
+    { value: totalSaved.toLocaleString(), label: 'Saved' },
+    { value: String(subjectCount), label: subjectCount === 1 ? 'Subject' : 'Subjects' },
     ...(chapterCount > 0 ? [{ value: String(chapterCount), label: chapterCount === 1 ? 'Chapter' : 'Chapters' }] : []),
   ]
   const basePath = '/dashboard/bookmarks'
@@ -264,7 +274,7 @@ export default async function BookmarksPage({
               </p>
             </div>
 
-            {bookmarks.length > 0 && (
+            {totalSaved > 0 && (
               <div className="rv-spec a-rise" style={stagger(2)}>
                 {spec.map(item => (
                   <div key={item.label} className="rv-spec-item">
@@ -282,7 +292,7 @@ export default async function BookmarksPage({
         <div className="rv-col">
 
           {/* ── Subject filter ──────────────────────────────────── */}
-          {subjects.length > 0 && (
+          {subjectCount > 0 && (
             <div className="rv-filter a-rise" style={stagger(2)}>
               <div className="rv-filter-head">
                 <span className="rv-filter-label"><SlidersHorizontal size={14} />Filter by subject</span>
@@ -296,7 +306,7 @@ export default async function BookmarksPage({
                     aria-current={!activeSubject ? 'page' : undefined}
                   >
                     All subjects
-                    <span className="rv-tab-count">{bookmarks.length}</span>
+                    <span className="rv-tab-count">{totalSaved}</span>
                   </Link>
                   {subjectCounts.map((subj, i) => (
                     <Link
@@ -316,11 +326,12 @@ export default async function BookmarksPage({
             </div>
           )}
 
-          {bookmarks.length > 0 && (
+          {totalSaved > 0 && (
             <div className="rv-result a-rise" style={stagger(3)}>
               <h2 className="rv-result-title">{activeSubject ?? 'All subjects'}</h2>
               <span className="rv-result-meta">
-                {filtered.length} question{filtered.length !== 1 ? 's' : ''}
+                {activeTotal} question{activeTotal !== 1 ? 's' : ''}
+                {filtered.length < activeTotal ? ` · showing the newest ${filtered.length}` : ''}
               </span>
             </div>
           )}
