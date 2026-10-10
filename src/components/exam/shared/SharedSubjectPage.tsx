@@ -9,7 +9,7 @@
 import Link from 'next/link'
 import { ChevronRight, ArrowUpRight } from 'lucide-react'
 import { createPublicSupabaseClient, assertQuerySucceeded } from '@/lib/supabase/public'
-import CustomExamBuilder from '@/components/exam/CustomExamBuilder'
+import CustomExamBuilder, { type CustomExamOptions } from '@/components/exam/CustomExamBuilder'
 import { compareBatches } from '@/lib/batch-order'
 
 interface LinkedBatchRow {
@@ -196,36 +196,24 @@ export default async function SharedSubjectPage({
   const totalExams = batches.reduce((n: number, b: any) => n + b.examCount, 0)
   const totalQuestions = batches.reduce((n: number, b: any) => n + b.totalQuestions, 0)
 
-  // Doctors & chapters for Custom Exam Builder
+  // Doctors of the subject (for the "Doctors" figure), and the Custom Exam Builder
+  // options counted in the database (only doctors with tagged questions;
+  // lectures carry their chapter)
   const allExamIds = examRows.map(e => e.id)
-
-  const [doctorsRes, qMeta] = await Promise.all([
-    allExamIds.length > 0
-      ? supabase.from('exam_doctors').select('doctor:doctors(id, name)').in('exam_id', allExamIds)
-      : Promise.resolve({ data: [], error: null }),
-    allExamIds.length > 0
-      ? supabase.from('questions').select('chapter_id, lecture_id, chapter:chapters(id, name), lecture:lectures(id, name)').in('exam_id', allExamIds).is('deleted_at', null)
-      : Promise.resolve({ data: [], error: null }),
-  ])
-
-  assertQuerySucceeded(doctorsRes.error, 'subject doctors')
-  assertQuerySucceeded(qMeta.error, 'subject chapters and lectures')
-
-  const doctorMap = new Map<string, string>()
-  ;(doctorsRes.data ?? []).forEach((r: any) => {
-    if (r.doctor) doctorMap.set(r.doctor.id, r.doctor.name)
-  })
-  const doctors = Array.from(doctorMap, ([id, name]) => ({ id, name }))
-  const chapterMap = new Map<string, string>()
-  const lectureMap = new Map<string, string>()
-  ;(qMeta.data ?? []).forEach((q: any) => {
-    const ch = Array.isArray(q.chapter) ? q.chapter[0] : q.chapter
-    const le = Array.isArray(q.lecture) ? q.lecture[0] : q.lecture
-    if (ch?.id) chapterMap.set(ch.id, ch.name)
-    if (le?.id) lectureMap.set(le.id, le.name)
-  })
-  const chapters = Array.from(chapterMap, ([id, name]) => ({ id, name }))
-  const lectures = Array.from(lectureMap, ([id, name]) => ({ id, name }))
+  let customOptions: CustomExamOptions = {
+    total_questions: 0, tagged_questions: 0, doctors: [], chapters: [], lectures: [],
+  }
+  let doctorCount = 0
+  if (allExamIds.length > 0) {
+    const [doctorsRes, optionsRes] = await Promise.all([
+      supabase.from('exam_doctors').select('doctor_id').in('exam_id', allExamIds),
+      supabase.rpc('get_custom_exam_options', { p_subject_id: subjectId }),
+    ])
+    assertQuerySucceeded(doctorsRes.error, 'subject doctors')
+    assertQuerySucceeded(optionsRes.error, 'custom exam options')
+    doctorCount = new Set((doctorsRes.data ?? []).map(r => r.doctor_id)).size
+    if (optionsRes.data) customOptions = optionsRes.data as CustomExamOptions
+  }
 
   // ── Derived values ─────────────────────────────────────────
   const maxQuestions = Math.max(1, ...batches.map((b: any) => b.totalQuestions))
@@ -233,7 +221,7 @@ export default async function SharedSubjectPage({
     { value: batches.length, label: batches.length === 1 ? 'Batch' : 'Batches' },
     { value: totalExams, label: totalExams === 1 ? 'Exam' : 'Exams' },
     { value: totalQuestions, label: totalQuestions === 1 ? 'Question' : 'Questions' },
-    ...(doctors.length > 0 ? [{ value: doctors.length, label: doctors.length === 1 ? 'Doctor' : 'Doctors' }] : []),
+    ...(doctorCount > 0 ? [{ value: doctorCount, label: doctorCount === 1 ? 'Doctor' : 'Doctors' }] : []),
   ]
 
   return (
@@ -329,9 +317,7 @@ export default async function SharedSubjectPage({
             <CustomExamBuilder
               subjectId={subjectId}
               batches={batches.map((b: any) => ({ id: b.id, name: b.name }))}
-              doctors={doctors}
-              chapters={chapters}
-              lectures={lectures}
+              options={customOptions}
               basePath={basePath}
             />
           </aside>

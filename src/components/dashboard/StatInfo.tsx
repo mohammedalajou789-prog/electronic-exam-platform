@@ -68,7 +68,11 @@ export default function StatInfo({ label, description, tone = 'light' }: StatInf
       close()
     }
     function handleKeyDown(event: KeyboardEvent): void {
-      if (event.key === 'Escape') close()
+      if (event.key === 'Escape') {
+        // Only this explanation closes, not a dialog it sits in
+        event.preventDefault()
+        close()
+      }
     }
 
     document.addEventListener('pointerdown', handlePointerDown)

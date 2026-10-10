@@ -1,23 +1,49 @@
 ﻿'use client'
 
-import { useEffect, useState } from 'react'
+// src/components/exam/CustomExamBuilder.tsx
+//
+// "Build your own exam" card on a subject page and the dialog that creates a
+// custom exam. The dialog is rendered straight into <body> (a portal) so it is
+// never trapped under the navbar by an animated parent.
+//
+// Logged-in students name their exam (it becomes the link) and can pick only
+// the questions they have not answered yet or got wrong on the first try.
+// Guests get a temporary exam; those two filters are shown locked.
+// The subject page is cached for everyone, so whether the visitor is logged in
+// is checked here, in the browser.
+
+import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Shuffle, Play, X, Check, Sparkles, Loader2, AlertCircle, ArrowRight, Layers, BookOpen, ListChecks } from 'lucide-react'
+import { Shuffle, Play, X, Check, Sparkles, Loader2, AlertCircle, ArrowRight, Layers, BookOpen, ListChecks, Lock, TriangleAlert } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
+import StatInfo from '@/components/dashboard/StatInfo'
 
 interface Batch { id: string; name: string }
-interface Doctor { id: string; name: string }
-interface ChapterItem { id: string; name: string }
-interface LectureItem { id: string; name: string }
+
+/** get_custom_exam_options: what the subject offers, counted in the database */
+export interface CustomExamOptions {
+  total_questions: number
+  /** Questions tagged with a doctor */
+  tagged_questions: number
+  /** Only doctors with tagged questions in this subject */
+  doctors: { id: string; name: string; count: number }[]
+  chapters: { id: string; name: string; count: number }[]
+  lectures: { id: string; name: string; chapter_id: string | null; count: number }[]
+}
+
 interface Props {
   subjectId: string
   batches: Batch[]
-  doctors: Doctor[]
-  chapters: ChapterItem[]
-  lectures: LectureItem[]
+  options: CustomExamOptions
   basePath: string
 }
 
+interface PillItem { id: string; name: string }
+
 const COUNT_PRESETS = [10, 20, 30, 50, 100]
+const MAX_QUESTIONS = 200
 const PILLS_VISIBLE = 12
 
 /** Stagger index for the shared animation classes in globals.css */
@@ -197,27 +223,99 @@ const BUILDER_CSS = `
     .cb-panel { padding: 14px; }
     .cb-actions { margin: 0 -16px -16px; padding-left: 16px; padding-right: 16px; }
   }
+
+  /* Exam name */
+  .cb-name { display: flex; flex-direction: column; gap: 8px; }
+  .cb-name input {
+    width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--bd-strong);
+    background: var(--bg-elev); color: var(--fg); font-family: inherit; font-size: 14px; font-weight: 600; outline: none;
+  }
+  .cb-name input:focus { border-color: var(--clr-primary); }
+  .cb-name input[aria-invalid="true"] { border-color: var(--clr-primary); }
+  .cb-name-hint { font-size: 11.5px; font-weight: 600; color: var(--fg-muted); line-height: 1.5; overflow-wrap: anywhere; }
+  .cb-name-hint code { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11px; color: var(--fg); }
+  .cb-name-bad { color: var(--clr-primary); }
+  .cb-guest-note { font-size: 12px; font-weight: 600; line-height: 1.55; color: var(--fg-muted); padding: 10px 12px; border-radius: 10px; background: var(--bg-elev); border: 1px dashed var(--bd-strong); }
+  .cb-guest-note a { color: var(--clr-primary); font-weight: 800; text-decoration: none; }
+
+  /* Group title extras: warning and "?" */
+  .cb-title-row { display: inline-flex; align-items: center; gap: 7px; }
+  .cb-warn { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; font-weight: 600; line-height: 1.5; color: var(--warn-ink); padding: 8px 10px; border-radius: 10px; background: var(--warn-soft); border: 1px solid var(--warn-bd); }
+  .cb-warn svg { flex-shrink: 0; margin-top: 2px; }
+  .cb-note { font-size: 12.5px; font-weight: 600; color: var(--fg-muted); }
+  .cb-pill small { font-size: 11px; font-weight: 700; opacity: .65; }
+
+  /* Personal filters: locked for guests */
+  .cb-pill:disabled { cursor: not-allowed; opacity: .55; }
+  .cb-pill:disabled:hover { border-color: var(--bd); }
+  .cb-lock { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--fg-muted); }
+  .cb-lock a { color: var(--clr-primary); font-weight: 800; text-decoration: none; }
 `
+
+// English letters, digits, spaces and - ( ) & , . ' _ ; 3 to 60 characters; at least one letter.
+// The database checks the same rule.
+const NAME_PATTERN = /^[A-Za-z0-9 ()&,.'_-]{3,60}$/
+
+function cleanName(raw: string): string {
+  return raw.trim().replace(/\s+/g, ' ')
+}
+
+function nameProblem(raw: string): string | null {
+  const name = cleanName(raw)
+  if (name.length === 0) return 'Give your exam a name'
+  if (!NAME_PATTERN.test(name) || !/[A-Za-z]/.test(name)) {
+    return 'Use 3 to 60 English letters, digits and spaces'
+  }
+  return null
+}
+
+/** The link name made from the exam name (same rule as the database) */
+function slugOf(raw: string): string {
+  return cleanName(raw).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+}
+
+const FIRST_WRONG_HELP =
+  'Questions whose first answer was wrong, in any exam. Only your first try counts: a question you got wrong at first and right later is still included.'
+const NOT_ANSWERED_HELP =
+  'Questions you have never answered: the ones you skipped and the ones you have not seen yet.'
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export default function CustomExamBuilder({ subjectId, batches, doctors, chapters, lectures, basePath }: Props) {
+export default function CustomExamBuilder({ subjectId, batches, options, basePath }: Props) {
   const router = useRouter()
   const [isOpen, setIsOpen] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState('')
+  const [signedIn, setSignedIn] = useState<boolean | null>(null)
+  const [name, setName] = useState('')
+  const [nameTouched, setNameTouched] = useState(false)
   const [selectedBatches, setSelectedBatches] = useState<string[]>([])
   const [selectedDoctors, setSelectedDoctors] = useState<string[]>([])
   const [selectedChapters, setSelectedChapters] = useState<string[]>([])
   const [selectedLectures, setSelectedLectures] = useState<string[]>([])
+  const [notAnswered, setNotAnswered] = useState(false)
+  const [firstWrong, setFirstWrong] = useState(false)
   const [questionCount, setQuestionCount] = useState(20)
+  const [countText, setCountText] = useState('20')
   const [randomize, setRandomize] = useState(true)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+
+  const { doctors, chapters, lectures } = options
+
+  // Is the visitor logged in? (read from the local session, no network call)
+  useEffect(() => {
+    if (!isOpen || signedIn !== null) return
+    let cancelled = false
+    createClient().auth.getSession().then(({ data }) => {
+      if (!cancelled) setSignedIn(!!data.session)
+    })
+    return () => { cancelled = true }
+  }, [isOpen, signedIn])
 
   // Close with Escape and lock the page scroll while the builder is open
   useEffect(() => {
     if (!isOpen) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !isGenerating) setIsOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented && !isGenerating) setIsOpen(false) }
     const prevOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     window.addEventListener('keydown', onKey)
@@ -227,30 +325,64 @@ export default function CustomExamBuilder({ subjectId, batches, doctors, chapter
     }
   }, [isOpen, isGenerating])
 
+  // Lectures follow the chosen chapters (all lectures when no chapter is chosen)
+  const visibleLectures = useMemo<PillItem[]>(
+    () => (selectedChapters.length === 0
+      ? lectures
+      : lectures.filter(l => l.chapter_id !== null && selectedChapters.includes(l.chapter_id))),
+    [lectures, selectedChapters]
+  )
+
+  // A chosen lecture that is no longer shown is unselected
+  useEffect(() => {
+    const shown = new Set(visibleLectures.map(l => l.id))
+    setSelectedLectures(prev => (prev.every(id => shown.has(id)) ? prev : prev.filter(id => shown.has(id))))
+  }, [visibleLectures])
+
   function toggleItem(id: string, selected: string[], setSelected: (v: string[]) => void) {
     setSelected(selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id])
   }
 
+  function setCount(n: number): void {
+    const value = Math.min(MAX_QUESTIONS, Math.max(1, n))
+    setQuestionCount(value)
+    setCountText(String(value))
+  }
+
+  const nameError = signedIn ? nameProblem(name) : null
+  const slug = signedIn ? slugOf(name) : ''
+
   async function handleGenerate() {
+    if (signedIn && nameError) {
+      setNameTouched(true)
+      return
+    }
     setIsGenerating(true)
     setError('')
     try {
-      const params = new URLSearchParams()
-      params.set('subjectId', subjectId)
-      params.set('count', questionCount.toString())
-      params.set('randomize', randomize.toString())
-      if (selectedBatches.length > 0) params.set('batches', selectedBatches.join(','))
-      if (selectedDoctors.length > 0) params.set('doctors', selectedDoctors.join(','))
-      if (selectedChapters.length > 0) params.set('chapters', selectedChapters.join(','))
-      if (selectedLectures.length > 0) params.set('lectures', selectedLectures.join(','))
-      const res = await fetch(`/api/custom-exam?${params.toString()}`)
-      const data = await res.json()
-      if (!res.ok || !data.examId) {
-        setError(data.error || 'Failed to generate exam. Please try again.')
+      const res = await fetch('/api/custom-exam', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subjectId,
+          name: signedIn ? cleanName(name) : null,
+          count: questionCount,
+          randomize,
+          batchIds: selectedBatches,
+          doctorIds: selectedDoctors,
+          chapterIds: selectedChapters,
+          lectureIds: selectedLectures,
+          notAnswered: signedIn ? notAnswered : false,
+          firstWrong: signedIn ? firstWrong : false,
+        }),
+      })
+      const data = (await res.json()) as { id?: string; slug?: string | null; error?: string }
+      if (!res.ok || !data.id) {
+        setError(data.error || 'Failed to generate the exam. Please try again.')
         setIsGenerating(false)
         return
       }
-      router.push(`${basePath}/custom/${data.examId}`)
+      router.push(`${basePath}/custom/${data.id}`)
     } catch {
       setError('Something went wrong. Please try again.')
       setIsGenerating(false)
@@ -262,7 +394,9 @@ export default function CustomExamBuilder({ subjectId, batches, doctors, chapter
     setSelectedDoctors([])
     setSelectedChapters([])
     setSelectedLectures([])
-    setQuestionCount(20)
+    setNotAnswered(false)
+    setFirstWrong(false)
+    setCount(20)
     setRandomize(true)
     setError('')
   }
@@ -272,19 +406,25 @@ export default function CustomExamBuilder({ subjectId, batches, doctors, chapter
     n === 0 || n === total ? `all ${word}s` : `${n} ${word}${n === 1 ? '' : 's'}`
   const summaryParts = [
     batches.length > 0 && scope(selectedBatches.length, batches.length, 'batch'),
-    doctors.length > 0 && scope(selectedDoctors.length, doctors.length, 'doctor'),
+    doctors.length > 0 && selectedDoctors.length > 0 && scope(selectedDoctors.length, doctors.length, 'doctor'),
     chapters.length > 0 && scope(selectedChapters.length, chapters.length, 'chapter'),
-    lectures.length > 0 && scope(selectedLectures.length, lectures.length, 'lecture'),
+    visibleLectures.length > 0 && scope(selectedLectures.length, visibleLectures.length, 'lecture'),
+    signedIn && notAnswered && firstWrong && 'not answered yet or wrong on first try',
+    signedIn && notAnswered && !firstWrong && 'not answered yet',
+    signedIn && firstWrong && !notAnswered && 'wrong on first try',
   ].filter(Boolean) as string[]
   const summary = `${questionCount} question${questionCount === 1 ? '' : 's'} from ${summaryParts.join(' · ')}`
     .replace('all batchs', 'all batches')
-  const totalSelected = selectedBatches.length + selectedDoctors.length + selectedChapters.length + selectedLectures.length
+  const totalSelected = selectedBatches.length + selectedDoctors.length + selectedChapters.length
+    + selectedLectures.length + (notAnswered ? 1 : 0) + (firstWrong ? 1 : 0)
 
   // ── Filter group ─────────────────────────────────────────
-  function Group({ id, title, items, selected, setSelected, index }: {
+  function Group({ id, title, extra, items, selected, setSelected, index }: {
     id: string
     title: string
-    items: { id: string; name: string }[]
+    /** Shown next to the title (e.g. a "?" button) */
+    extra?: React.ReactNode
+    items: (PillItem & { count?: number })[]
     selected: string[]
     setSelected: (v: string[]) => void
     index: number
@@ -295,7 +435,10 @@ export default function CustomExamBuilder({ subjectId, batches, doctors, chapter
     return (
       <div className={`cb-group a-rise${id === 'doctors' ? ' cb-caps' : ''}`} style={stagger(index)}>
         <div className="cb-group-head">
-          <span className="cb-group-title">{title}</span>
+          <span className="cb-title-row">
+            <span className="cb-group-title">{title}</span>
+            {extra}
+          </span>
           {selected.length > 0 ? (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
               <span className="cb-count">{selected.length} selected</span>
@@ -305,6 +448,15 @@ export default function CustomExamBuilder({ subjectId, batches, doctors, chapter
             <span className="cb-group-hint">All if none selected</span>
           )}
         </div>
+        {id === 'doctors' && (
+          <div className="cb-warn">
+            <TriangleAlert size={14} />
+            <span>
+              Not every question is tagged with its doctor ({options.tagged_questions.toLocaleString()} of{' '}
+              {options.total_questions.toLocaleString()} here). Choosing a doctor leaves untagged questions out.
+            </span>
+          </div>
+        )}
         <div className="cb-pills">
           {visible.map(item => {
             const on = selected.includes(item.id)
@@ -318,6 +470,7 @@ export default function CustomExamBuilder({ subjectId, batches, doctors, chapter
               >
                 {on && <Check size={12} strokeWidth={3} />}
                 {item.name}
+                {id === 'doctors' && typeof item.count === 'number' && <small>{item.count}</small>}
               </button>
             )
           })}
@@ -340,6 +493,223 @@ export default function CustomExamBuilder({ subjectId, batches, doctors, chapter
     chapters.length > 0 && `${chapters.length} chapter${chapters.length === 1 ? '' : 's'}`,
     lectures.length > 0 && `${lectures.length} lecture${lectures.length === 1 ? '' : 's'}`,
   ].filter(Boolean) as string[]
+
+  const isGuest = signedIn === false
+
+  const dialog = (
+    <div className="cb-overlay">
+      <div className="cb-scrim a-fade" onClick={() => !isGenerating && setIsOpen(false)} />
+
+      <div className="cb-dialog a-pop" role="dialog" aria-modal="true" aria-labelledby="cb-dialog-title">
+        <div className="cb-dialog-head">
+          <span className="cb-icon"><Shuffle size={19} /></span>
+          <span className="cb-titles">
+            <span id="cb-dialog-title" className="cb-title">Create a custom exam</span>
+            <span className="cb-desc">Leave a group empty to include all of it.</span>
+          </span>
+          <button type="button" className="cb-close press" aria-label="Close" onClick={() => setIsOpen(false)} disabled={isGenerating}>
+            <X size={17} />
+          </button>
+        </div>
+
+        <div className="cb-scroll">
+          <div className="cb-body">
+            <div className="cb-filters">
+              {/* Personal filters: logged-in students only (locked for guests) */}
+              <div className="cb-group a-rise" style={stagger(0)}>
+                <div className="cb-group-head">
+                  <span className="cb-group-title">Questions to include</span>
+                  {(notAnswered || firstWrong) && !isGuest ? (
+                    <button type="button" className="cb-clear" onClick={() => { setNotAnswered(false); setFirstWrong(false) }}>Clear</button>
+                  ) : (
+                    <span className="cb-group-hint">All if none selected</span>
+                  )}
+                </div>
+                <div className="cb-pills">
+                  <span className="cb-title-row">
+                    <button
+                      type="button"
+                      aria-pressed={notAnswered && !isGuest}
+                      className={`cb-pill${notAnswered && !isGuest ? ' on' : ''}`}
+                      disabled={signedIn !== true}
+                      onClick={() => setNotAnswered(v => !v)}
+                    >
+                      {isGuest ? <Lock size={12} /> : notAnswered && <Check size={12} strokeWidth={3} />}
+                      Not answered yet
+                    </button>
+                    <StatInfo label="Not answered yet" description={NOT_ANSWERED_HELP} />
+                  </span>
+                  <span className="cb-title-row">
+                    <button
+                      type="button"
+                      aria-pressed={firstWrong && !isGuest}
+                      className={`cb-pill${firstWrong && !isGuest ? ' on' : ''}`}
+                      disabled={signedIn !== true}
+                      onClick={() => setFirstWrong(v => !v)}
+                    >
+                      {isGuest ? <Lock size={12} /> : firstWrong && <Check size={12} strokeWidth={3} />}
+                      Wrong on first try
+                    </button>
+                    <StatInfo label="Wrong on first try" description={FIRST_WRONG_HELP} />
+                  </span>
+                </div>
+                {isGuest && (
+                  <span className="cb-lock">
+                    <Lock size={13} />
+                    <span><Link href="/register">Sign up</Link> to practise only the questions you missed or have not answered yet.</span>
+                  </span>
+                )}
+              </div>
+
+              {Group({ id: 'batches', title: 'Batch', items: batches, selected: selectedBatches, setSelected: setSelectedBatches, index: 1 })}
+              {doctors.length > 0 ? (
+                Group({
+                  id: 'doctors',
+                  title: 'Doctor',
+                  extra: (
+                    <StatInfo
+                      label="Doctor filter"
+                      description={`Not every question is tagged with the doctor who wrote it: in this subject ${options.tagged_questions.toLocaleString()} of ${options.total_questions.toLocaleString()} questions have a doctor. When you choose a doctor, only that doctor's tagged questions are included, so questions without a doctor are left out even if they belong to the same lectures.`}
+                    />
+                  ),
+                  items: doctors,
+                  selected: selectedDoctors,
+                  setSelected: setSelectedDoctors,
+                  index: 2,
+                })
+              ) : (
+                <div className="cb-group a-rise" style={stagger(2)}>
+                  <span className="cb-group-title">Doctor</span>
+                  <span className="cb-note">Questions in this subject are not tagged by doctor yet.</span>
+                </div>
+              )}
+              {Group({ id: 'chapters', title: 'Chapter', items: chapters, selected: selectedChapters, setSelected: setSelectedChapters, index: 3 })}
+              {Group({
+                id: 'lectures',
+                title: selectedChapters.length > 0 ? 'Lecture (in the chosen chapters)' : 'Lecture',
+                items: visibleLectures,
+                selected: selectedLectures,
+                setSelected: setSelectedLectures,
+                index: 4,
+              })}
+            </div>
+
+            <div className="cb-side a-rise" style={stagger(2)}>
+              <div className="cb-panel">
+                {signedIn && (
+                  <label className="cb-name">
+                    <span className="cb-label">Exam name</span>
+                    <input
+                      type="text"
+                      lang="en"
+                      dir="ltr"
+                      maxLength={60}
+                      placeholder="e.g. Cardio review"
+                      value={name}
+                      aria-invalid={nameTouched && !!nameError}
+                      onChange={e => setName(e.target.value)}
+                      onBlur={() => setNameTouched(true)}
+                    />
+                    {nameTouched && nameError ? (
+                      <span className="cb-name-hint cb-name-bad">{nameError}</span>
+                    ) : (
+                      <span className="cb-name-hint">
+                        English only. Private to you{slug ? <>; link ends with <code>/custom/{slug}</code></> : '.'}
+                      </span>
+                    )}
+                  </label>
+                )}
+                {isGuest && (
+                  <span className="cb-guest-note">
+                    Guest exams are temporary. <Link href="/register">Sign up</Link> to name your exams and keep them in your dashboard.
+                  </span>
+                )}
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <span className="cb-label">Number of questions</span>
+                  <div className="cb-seg" role="group" aria-label="Number of questions">
+                    {COUNT_PRESETS.map(n => (
+                      <button
+                        key={n}
+                        type="button"
+                        aria-pressed={questionCount === n}
+                        className={questionCount === n ? 'on' : undefined}
+                        onClick={() => setCount(n)}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                  <label className="cb-custom">
+                    Custom
+                    {/* Text input with English digits (a number input shows the browser's own digits) */}
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      lang="en"
+                      dir="ltr"
+                      value={countText}
+                      onChange={e => {
+                        const digits = e.target.value.replace(/[^0-9]/g, '').slice(0, 3)
+                        setCountText(digits)
+                        if (digits) setQuestionCount(Math.min(MAX_QUESTIONS, Math.max(1, parseInt(digits, 10))))
+                      }}
+                      onBlur={() => setCount(questionCount)}
+                    />
+                    <span>max {MAX_QUESTIONS}</span>
+                  </label>
+                </div>
+
+                <label className="cb-switch">
+                  <span>
+                    <strong>Randomize question order</strong>
+                    <small>Shuffle so position gives nothing away</small>
+                  </span>
+                  <input type="checkbox" checked={randomize} onChange={e => setRandomize(e.target.checked)} />
+                  <span className="cb-track" aria-hidden="true" />
+                </label>
+
+                <div className="cb-summary" aria-live="polite">
+                  <Sparkles size={15} />
+                  <span>{summary}</span>
+                </div>
+
+                {error && (
+                  <div className="cb-error a-rise" role="alert">
+                    <AlertCircle size={15} />
+                    {error}
+                  </div>
+                )}
+              </div>
+
+              <div className="cb-actions">
+                <button
+                  type="button"
+                  className="cb-btn cb-btn-solid press"
+                  onClick={handleGenerate}
+                  disabled={isGenerating || signedIn === null}
+                >
+                  {isGenerating
+                    ? <><Loader2 size={15} className="a-spin" />Generating…</>
+                    : <><Play size={14} fill="currentColor" />Generate exam</>}
+                </button>
+                <button
+                  type="button"
+                  className="cb-btn cb-btn-ghost press"
+                  onClick={reset}
+                  disabled={isGenerating}
+                  title={totalSelected > 0 ? 'Clear all selections' : 'Reset'}
+                >
+                  <X size={15} />
+                  Reset
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 
   return (
     <>
@@ -366,7 +736,7 @@ export default function CustomExamBuilder({ subjectId, batches, doctors, chapter
           {poolParts.length > 0 && (
             <li><span><Layers size={15} /></span>Pick from {poolParts.join(' · ')}</li>
           )}
-          <li><span><ListChecks size={15} /></span>Choose 10 to 100 questions</li>
+          <li><span><ListChecks size={15} /></span>Choose up to {MAX_QUESTIONS} questions</li>
           <li><span><BookOpen size={15} /></span>Instant feedback and explanations</li>
         </ul>
 
@@ -376,110 +746,8 @@ export default function CustomExamBuilder({ subjectId, batches, doctors, chapter
         </button>
       </div>
 
-      {/* ── Builder dialog ──────────────────────────────────────── */}
-      {isOpen && (
-        <div className="cb-overlay">
-          <div className="cb-scrim a-fade" onClick={() => !isGenerating && setIsOpen(false)} />
-
-          <div className="cb-dialog a-pop" role="dialog" aria-modal="true" aria-labelledby="cb-dialog-title">
-            <div className="cb-dialog-head">
-              <span className="cb-icon"><Shuffle size={19} /></span>
-              <span className="cb-titles">
-                <span id="cb-dialog-title" className="cb-title">Create a custom exam</span>
-                <span className="cb-desc">Leave a group empty to include all of it.</span>
-              </span>
-              <button type="button" className="cb-close press" aria-label="Close" onClick={() => setIsOpen(false)} disabled={isGenerating}>
-                <X size={17} />
-              </button>
-            </div>
-
-            <div className="cb-scroll">
-              <div className="cb-body">
-                <div className="cb-filters">
-                  {Group({ id: 'batches', title: 'Batch', items: batches, selected: selectedBatches, setSelected: setSelectedBatches, index: 0 })}
-                  {Group({ id: 'doctors', title: 'Doctor', items: doctors, selected: selectedDoctors, setSelected: setSelectedDoctors, index: 1 })}
-                  {Group({ id: 'chapters', title: 'Chapter', items: chapters, selected: selectedChapters, setSelected: setSelectedChapters, index: 2 })}
-                  {Group({ id: 'lectures', title: 'Lecture', items: lectures, selected: selectedLectures, setSelected: setSelectedLectures, index: 3 })}
-                </div>
-
-                <div className="cb-side a-rise" style={stagger(2)}>
-                  <div className="cb-panel">
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                      <span className="cb-label">Number of questions</span>
-                      <div className="cb-seg" role="group" aria-label="Number of questions">
-                        {COUNT_PRESETS.map(n => (
-                          <button
-                            key={n}
-                            type="button"
-                            aria-pressed={questionCount === n}
-                            className={questionCount === n ? 'on' : undefined}
-                            onClick={() => setQuestionCount(n)}
-                          >
-                            {n}
-                          </button>
-                        ))}
-                      </div>
-                      <label className="cb-custom">
-                        Custom
-                        <input
-                          type="number"
-                          min={1}
-                          value={questionCount}
-                          onChange={e => setQuestionCount(Math.max(1, parseInt(e.target.value) || 1))}
-                        />
-                      </label>
-                    </div>
-
-                    <label className="cb-switch">
-                      <span>
-                        <strong>Randomize question order</strong>
-                        <small>Shuffle so position gives nothing away</small>
-                      </span>
-                      <input type="checkbox" checked={randomize} onChange={e => setRandomize(e.target.checked)} />
-                      <span className="cb-track" aria-hidden="true" />
-                    </label>
-
-                    <div className="cb-summary" aria-live="polite">
-                      <Sparkles size={15} />
-                      <span>{summary}</span>
-                    </div>
-
-                    {error && (
-                      <div className="cb-error a-rise" role="alert">
-                        <AlertCircle size={15} />
-                        {error}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="cb-actions">
-                    <button
-                      type="button"
-                      className="cb-btn cb-btn-solid press"
-                      onClick={handleGenerate}
-                      disabled={isGenerating}
-                    >
-                      {isGenerating
-                        ? <><Loader2 size={15} className="a-spin" />Generating…</>
-                        : <><Play size={14} fill="currentColor" />Generate exam</>}
-                    </button>
-                    <button
-                      type="button"
-                      className="cb-btn cb-btn-ghost press"
-                      onClick={reset}
-                      disabled={isGenerating}
-                      title={totalSelected > 0 ? 'Clear all selections' : 'Reset'}
-                    >
-                      <X size={15} />
-                      Reset
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ── Builder dialog (above everything, including the navbar) ── */}
+      {isOpen && typeof document !== 'undefined' && createPortal(dialog, document.body)}
     </>
   )
 }
