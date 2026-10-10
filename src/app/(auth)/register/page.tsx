@@ -86,8 +86,8 @@ export default function RegisterPage() {
       return
     }
 
-    router.push('/dashboard')
-    router.refresh()
+    // One navigation only: refresh() after push() rendered the dashboard twice
+    router.replace('/dashboard')
   }
 
   const strength = strengthOf(password)

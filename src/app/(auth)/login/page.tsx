@@ -30,8 +30,9 @@ export default function LoginPage() {
     if (data.user) {
       const { data: adminData } = await supabase
         .from('admins').select('role').eq('user_id', data.user.id).single()
-      router.push(adminData ? '/admin' : '/')
-      router.refresh()
+      // Go straight to the right page: '/' would only redirect to /dashboard (an extra round trip),
+      // and refresh() after push() rendered the page twice. replace(): Back does not return to the form.
+      router.replace(adminData ? '/admin' : '/dashboard')
     }
   }
 
