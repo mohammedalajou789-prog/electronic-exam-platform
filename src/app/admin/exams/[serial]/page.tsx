@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import QuestionImagesEditor from '@/components/admin/QuestionImagesEditor'
 
 interface Question {
   id: string
@@ -23,6 +24,7 @@ interface Question {
   chapter_id: string | null
   lecture_id: string | null
   doctor_id: string | null
+  question_images?: { id: string }[]
 }
 
 interface Exam {
@@ -266,6 +268,7 @@ function QuestionCard({
   const [saved, setSaved]     = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
+  const [imageCount, setImageCount] = useState(question.question_images?.length ?? 0)
 
   function set(name: string, value: string) {
     setForm(p => ({ ...p, [name]: value }))
@@ -328,6 +331,25 @@ function QuestionCard({
             {lectures.find(l => l.id === form.lecture_id)?.name && <span>{lectures.find(l => l.id === form.lecture_id)?.name}</span>}
           </div>
         </div>
+
+        {/* Image count (question and explanation images) */}
+        {imageCount > 0 && (
+          <span
+            title={`${imageCount} image${imageCount === 1 ? '' : 's'}`}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              fontSize: 11.5, fontWeight: 800, color: 'var(--fg-muted)',
+              flexShrink: 0, marginTop: 3,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="4" width="18" height="16" rx="2.5" />
+              <circle cx="8.5" cy="9.5" r="1.6" />
+              <path d="M4 16l5-5 4.5 4.5L16 12l4 4" />
+            </svg>
+            {imageCount}
+          </span>
+        )}
 
         {/* Correct answer badge */}
         <span style={{
@@ -489,6 +511,13 @@ function QuestionCard({
             ))}
           </div>
 
+          {/* Images: saved immediately, not with Save Changes */}
+          <QuestionImagesEditor
+            questionId={question.id}
+            explanation={form.explanation}
+            onCountChange={setImageCount}
+          />
+
           {/* Save + Delete row */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button
@@ -587,7 +616,7 @@ export default function ExamEditPage({ params }: { params: Promise<{ serial: str
       if (examData?.id) {
         const qRes = await supabase
           .from('questions')
-          .select('*')
+          .select('*, question_images(id)')
           .eq('exam_id', examData.id)
           .is('deleted_at', null)
           .order('question_order')
