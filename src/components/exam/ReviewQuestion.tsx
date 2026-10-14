@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import { ExplanationRenderer } from '@/components/exam/ExplanationRenderer'
 import ReportButton from '@/components/exam/ReportButton'
+import QuestionImages from '@/components/exam/QuestionImages'
+import { explanationImagesOf, type QuestionImageRow } from '@/lib/question-images'
 
 const choices = ['a', 'b', 'c', 'd', 'e'] as const
 
@@ -24,6 +26,7 @@ interface Question {
   chapter: { id: string; name: string } | null
   lecture: { id: string; name: string } | null
   question_statistics?: { attempts: number; correct_answers: number }[]
+  question_images?: QuestionImageRow[]
   [key: string]: unknown
 }
 
@@ -87,6 +90,9 @@ export default function ReviewQuestion({ question, index }: { question: Question
       }}>
         {question.question_text}
       </div>
+
+      {/* Images */}
+      <QuestionImages images={question.question_images} maxHeight={360} />
 
       {/* Choices */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -168,7 +174,7 @@ export default function ReviewQuestion({ question, index }: { question: Question
       {/* Explanation */}
       {showExplanation && question.explanation && (
         <div style={{ marginTop: 16 }}>
-          <ExplanationRenderer content={question.explanation} />
+          <ExplanationRenderer content={question.explanation} slotImages={explanationImagesOf(question.question_images)} />
         </div>
       )}
     </div>

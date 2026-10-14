@@ -113,8 +113,8 @@ export function presignPutUrl(
   return `https://${host}${path}?${canonicalQuery}&X-Amz-Signature=${signature(config, dateStamp, stringToSign)}`
 }
 
-/** Signs and sends a request without a body (HEAD or DELETE) to one object. */
-async function sendSigned(method: 'HEAD' | 'DELETE', key: string, now: Date = new Date()): Promise<Response> {
+/** Signs and sends one request without a body (HEAD or DELETE) to one object. */
+async function sendSignedOnce(method: 'HEAD' | 'DELETE', key: string, now: Date = new Date()): Promise<Response> {
   const config = getConfig()
   const host = `${config.accountId}.r2.cloudflarestorage.com`
   const path = objectPath(config.bucket, key)
@@ -142,6 +142,26 @@ async function sendSigned(method: 'HEAD' | 'DELETE', key: string, now: Date = ne
         `SignedHeaders=${signedHeaders}, Signature=${signature(config, dateStamp, stringToSign)}`,
     },
   })
+}
+
+/**
+ * Like sendSignedOnce, but tries up to 3 times when the connection fails or R2 answers
+ * with a server error (a slow or interrupted connection should not leave an unused
+ * file behind). Each try is signed again with the current time.
+ */
+async function sendSigned(method: 'HEAD' | 'DELETE', key: string): Promise<Response> {
+  let lastError: unknown = null
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(resolve => setTimeout(resolve, attempt * 700))
+    try {
+      const res = await sendSignedOnce(method, key)
+      if (res.status < 500) return res
+      lastError = new Error(`R2 ${method} failed with status ${res.status}`)
+    } catch (err) {
+      lastError = err
+    }
+  }
+  throw lastError
 }
 
 export interface ObjectInfo {

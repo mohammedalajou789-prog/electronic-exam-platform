@@ -13,6 +13,8 @@ import {
   Layers, Clock3, RotateCcw, Loader2, FileText,
 } from 'lucide-react'
 import { ExplanationRenderer } from '@/components/exam/ExplanationRenderer'
+import QuestionImages from '@/components/exam/QuestionImages'
+import { explanationImagesOf, type QuestionImageRow } from '@/lib/question-images'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -33,6 +35,7 @@ export interface ReviewQuestion {
   incorrect_explanation_c: string | null
   incorrect_explanation_d: string | null
   incorrect_explanation_e: string | null
+  question_images?: QuestionImageRow[]
   chapter?: Named
   lecture?: Named
   exam?: any
@@ -354,6 +357,7 @@ function QuestionCard({
 
         {/* Question */}
         <p className="rq-q">{q.question_text}</p>
+        <QuestionImages images={q.question_images} maxHeight={320} marginBottom={14} />
 
         {/* Options */}
         <div className="rq-opts" role="group" aria-label="Answer choices">
@@ -419,7 +423,7 @@ function QuestionCard({
           {everOpened && (
             <div className="rq-expl-body">
               <span className="rq-expl-title"><Lightbulb size={14} />Explanation</span>
-              {q.explanation && <ExplanationRenderer content={q.explanation} />}
+              {q.explanation && <ExplanationRenderer content={q.explanation} slotImages={explanationImagesOf(q.question_images)} />}
               {wrongNotes.length > 0 && (
                 <div className="rq-why">
                   <span className="rq-why-title">Why the other options are wrong</span>

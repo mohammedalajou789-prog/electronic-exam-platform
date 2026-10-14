@@ -36,7 +36,7 @@ export default async function SharedReviewPage({
     const supabase = createPublicSupabaseClient()
     const { data, error } = await supabase
       .from('questions')
-      .select('*, question_statistics(*), chapter:chapters(id, name), lecture:lectures(id, name)')
+      .select('*, question_statistics(*), chapter:chapters(id, name), lecture:lectures(id, name), question_images(storage_key, slot_type, display_order, caption)')
       .eq('exam_id', examId)
       .is('deleted_at', null)
       .order('question_order', { ascending: true })
@@ -50,7 +50,7 @@ export default async function SharedReviewPage({
     if (!customExam) notFound()
     const { data } = await supabase
       .from('questions')
-      .select('*, question_statistics(*), chapter:chapters(id, name), lecture:lectures(id, name)')
+      .select('*, question_statistics(*), chapter:chapters(id, name), lecture:lectures(id, name), question_images(storage_key, slot_type, display_order, caption)')
       .in('id', customExam.question_ids)
       .is('deleted_at', null)
     questions = inExamOrder((data ?? []) as { id: string }[], customExam.question_ids)

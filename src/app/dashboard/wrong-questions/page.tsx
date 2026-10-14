@@ -238,6 +238,7 @@ export default async function WrongQuestionsPage({
         incorrect_explanation_a, incorrect_explanation_b,
         incorrect_explanation_c, incorrect_explanation_d,
         incorrect_explanation_e,
+        question_images(storage_key, slot_type, display_order, caption),
         exam:exams!inner(
           id, title,
           batch:batches(name),

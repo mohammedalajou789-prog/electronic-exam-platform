@@ -5,6 +5,8 @@ import { useRouter, usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { ExplanationRenderer } from '@/components/exam/ExplanationRenderer'
 import ExamResultView, { type ChapterResult } from '@/components/exam/ExamResultView'
+import QuestionImages from '@/components/exam/QuestionImages'
+import { explanationImagesOf, type QuestionImageRow } from '@/lib/question-images'
 import {
   startAttempt,
   recordAnswer,
@@ -25,10 +27,6 @@ import {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface QuestionImage {
-  image_url: string
-  display_order: number
-}
 interface QuestionStatistic {
   attempts: number
   correct_answers: number
@@ -52,7 +50,7 @@ interface Question {
   lecture: { id: string; name: string } | null
   question_order: number
   doctor?: { name: string } | null
-  question_images?: QuestionImage[]
+  question_images?: QuestionImageRow[]
   question_statistics?: QuestionStatistic[]
 }
 interface Exam {
@@ -1043,7 +1041,6 @@ export default function InteractiveExam({
   // ══════════════════════════════════════════════════════════════════════════
   if (mode === 'play' && currentQ) {
     const opts = buildOptions(currentQ, selectedKey, true)
-    const imgUrl = currentQ.question_images?.[0]?.image_url
 
     return (
       <div
@@ -1247,28 +1244,8 @@ export default function InteractiveExam({
               {currentQ.question_text}
             </div>
 
-            {/* Image */}
-            {imgUrl && (
-              <div
-                style={{
-                  marginBottom: 16,
-                  borderRadius: 12,
-                  overflow: 'hidden',
-                  border: '1px solid var(--bd)',
-                }}
-              >
-                <img
-                  src={imgUrl}
-                  alt="Question"
-                  style={{
-                    width: '100%',
-                    maxHeight: 360,
-                    objectFit: 'contain',
-                    display: 'block',
-                  }}
-                />
-              </div>
-            )}
+            {/* Images */}
+            <QuestionImages images={currentQ.question_images} maxHeight={360} />
 
             {/* Answer choices */}
             <div
@@ -1435,7 +1412,7 @@ export default function InteractiveExam({
                 paddingTop: 20,
               }}
             >
-              <ExplanationRenderer content={currentQ.explanation} />
+              <ExplanationRenderer content={currentQ.explanation} slotImages={explanationImagesOf(currentQ.question_images)} />
 
               {/* Bottom nav — after long explanation */}
               <div
@@ -2179,7 +2156,6 @@ export default function InteractiveExam({
       >
         {questions.map((q, i) => {
           const opts = buildOptions(q, q.correct_answer, false)
-          const imgUrl = q.question_images?.[0]?.image_url
           const stats = q.question_statistics?.[0]
           const correctPct =
             stats && stats.attempts > 0
@@ -2258,20 +2234,7 @@ export default function InteractiveExam({
                 {q.question_text}
               </div>
 
-              {imgUrl && (
-                <div
-                  style={{
-                    marginBottom: 14, borderRadius: 12, overflow: 'hidden',
-                    border: '1px solid var(--bd)',
-                  }}
-                >
-                  <img
-                    src={imgUrl}
-                    alt="Question"
-                    style={{ width: '100%', maxHeight: 300, objectFit: 'contain', display: 'block' }}
-                  />
-                </div>
-              )}
+              <QuestionImages images={q.question_images} maxHeight={300} marginBottom={14} />
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {opts.map(opt => (
@@ -2298,7 +2261,7 @@ export default function InteractiveExam({
 
               {q.explanation && (
                 <div style={{ marginTop: 14 }}>
-                  <ExplanationRenderer content={q.explanation} />
+                  <ExplanationRenderer content={q.explanation} slotImages={explanationImagesOf(q.question_images)} />
                 </div>
               )}
             </div>

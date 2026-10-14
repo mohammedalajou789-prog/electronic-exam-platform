@@ -14,6 +14,8 @@ interface ExplanationRendererProps {
   content: string;
   slotImages?: Record<1 | 2 | 3, string | null>;
   onSlotUpload?: (slotNumber: 1 | 2 | 3, file: File) => void;
+  /** Show an empty frame where a slot has no image (admin previews). Students never see it. */
+  showEmptySlots?: boolean;
 }
 
 // ─── Inline Token Renderer ───────────────────────────────────────────────────
@@ -111,12 +113,14 @@ function BlockToken({
   borderColor,
   onSlotUpload,
   inputIdPrefix,
+  showEmptySlots,
 }: {
   token: MnToken;
   slotImages: Record<1 | 2 | 3, string | null>;
   accentDark: string;
   borderColor: string;
   onSlotUpload?: (slotNumber: 1 | 2 | 3, file: File) => void;
+  showEmptySlots: boolean;
   /** Makes the file input id unique when several explanations are on one page */
   inputIdPrefix: string;
 }) {
@@ -194,6 +198,9 @@ case 'list':
           </div>
         );
       }
+
+      // Students see nothing where no image was added
+      if (!onSlotUpload && !showEmptySlots) return null;
 
       return (
         <>
@@ -325,6 +332,7 @@ export function ExplanationRenderer({
   content,
   slotImages = { 1: null, 2: null, 3: null },
   onSlotUpload,
+  showEmptySlots = false,
 }: ExplanationRendererProps) {
   const inputIdPrefix = useId();
 
@@ -411,6 +419,7 @@ export function ExplanationRenderer({
           borderColor={borderColor}
           onSlotUpload={onSlotUpload}
           inputIdPrefix={inputIdPrefix}
+          showEmptySlots={showEmptySlots}
         />
       ))}
     </div>

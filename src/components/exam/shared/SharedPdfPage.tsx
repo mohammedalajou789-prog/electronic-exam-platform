@@ -5,6 +5,8 @@ import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { ExplanationRenderer } from '@/components/exam/ExplanationRenderer'
 import { loadCustomExam, inExamOrder } from '@/features/exam-engine/custom-exam'
+import QuestionImages from '@/components/exam/QuestionImages'
+import { explanationImagesOf, type QuestionImageRow } from '@/lib/question-images'
 
 interface Question {
   id: string
@@ -18,7 +20,7 @@ interface Question {
   explanation: string | null
   chapter: { id: string; name: string } | null
   lecture: { id: string; name: string } | null
-  image_url: string | null
+  question_images: QuestionImageRow[]
 }
 
 interface ExamInfo {
@@ -96,7 +98,7 @@ export default function SharedPdfPage({ examId, customExamId }: Props) {
           choice_a, choice_b, choice_c, choice_d, choice_e,
           correct_answer, explanation,
           chapter:chapters(id, name), lecture:lectures(id, name),
-          question_images ( image_url, display_order )
+          question_images ( storage_key, slot_type, display_order, caption )
         `)
         .eq('exam_id', examId)
         .is('deleted_at', null)
@@ -107,7 +109,7 @@ export default function SharedPdfPage({ examId, customExamId }: Props) {
           ...r,
           chapter: Array.isArray(r.chapter) ? r.chapter[0] || null : r.chapter,
           lecture: Array.isArray(r.lecture) ? r.lecture[0] || null : r.lecture,
-          image_url: (r.question_images as any[])?.[0]?.image_url || null,
+          question_images: r.question_images ?? [],
         })))
       }
 
@@ -126,7 +128,7 @@ export default function SharedPdfPage({ examId, customExamId }: Props) {
           choice_a, choice_b, choice_c, choice_d, choice_e,
           correct_answer, explanation,
           chapter:chapters(id, name), lecture:lectures(id, name),
-          question_images ( image_url, display_order )
+          question_images ( storage_key, slot_type, display_order, caption )
         `)
         .in('id', customExam.question_ids)
         .is('deleted_at', null)
@@ -136,7 +138,7 @@ export default function SharedPdfPage({ examId, customExamId }: Props) {
           ...r,
           chapter: Array.isArray(r.chapter) ? r.chapter[0] || null : r.chapter,
           lecture: Array.isArray(r.lecture) ? r.lecture[0] || null : r.lecture,
-          image_url: (r.question_images as any[])?.[0]?.image_url || null,
+          question_images: r.question_images ?? [],
         })))
       }
     }
@@ -249,11 +251,7 @@ export default function SharedPdfPage({ examId, customExamId }: Props) {
                 {q.lecture && <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: 'var(--bg-soft)', color: 'var(--fg-muted)' }}>{q.lecture.name}</span>}
               </div>
               <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--fg)', lineHeight: 1.6, marginBottom: 14 }}>{q.question_text}</div>
-              {q.image_url && (
-                <div style={{ marginBottom: 14, borderRadius: 12, overflow: 'hidden', border: '1px solid var(--bd)' }}>
-                  <img src={q.image_url} alt="Question image" style={{ width: '100%', maxHeight: 300, objectFit: 'contain', display: 'block' }} />
-                </div>
-              )}
+              <QuestionImages images={q.question_images} maxHeight={300} marginBottom={14} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {choices(q).map(opt => {
                   const isCorrect = showAnswers && opt.key === q.correct_answer
@@ -269,7 +267,7 @@ export default function SharedPdfPage({ examId, customExamId }: Props) {
               </div>
               {showExplanation && q.explanation && (
                 <div style={{ marginTop: 12 }}>
-                  <ExplanationRenderer content={q.explanation} />
+                  <ExplanationRenderer content={q.explanation} slotImages={explanationImagesOf(q.question_images)} />
                 </div>
               )}
             </div>

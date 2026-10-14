@@ -73,6 +73,32 @@ export function explanationSlots(explanation: string | null | undefined): (1 | 2
   return [...found].sort()
 }
 
+/** One row of question_images as the student pages read it. */
+export interface QuestionImageRow {
+  storage_key: string
+  slot_type: string
+  display_order: number
+  caption: string | null
+}
+
+/** The question images (not the explanation ones) in their order. */
+export function questionImagesOf(rows: readonly QuestionImageRow[] | null | undefined): QuestionImageRow[] {
+  return (rows ?? [])
+    .filter(r => r.slot_type === 'question')
+    .sort((a, b) => a.display_order - b.display_order)
+}
+
+/** The address of each explanation slot image, as ExplanationRenderer expects it. */
+export function explanationImagesOf(rows: readonly QuestionImageRow[] | null | undefined): Record<1 | 2 | 3, string | null> {
+  const slots: Record<1 | 2 | 3, string | null> = { 1: null, 2: null, 3: null }
+  for (const r of rows ?? []) {
+    if (r.slot_type === 'explanation_1') slots[1] = imageUrl(r.storage_key)
+    if (r.slot_type === 'explanation_2') slots[2] = imageUrl(r.storage_key)
+    if (r.slot_type === 'explanation_3') slots[3] = imageUrl(r.storage_key)
+  }
+  return slots
+}
+
 /** The public address of an image. */
 export function imageUrl(storageKey: string): string {
   const base = (process.env.NEXT_PUBLIC_IMAGES_BASE_URL ?? '').replace(/\/+$/, '')

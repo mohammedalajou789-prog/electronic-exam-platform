@@ -225,7 +225,7 @@ export function MnEditor({
       {mode === 'preview' && (
         <div className="p-4">
           {value.trim() ? (
-            <ExplanationRenderer content={value} />
+            <ExplanationRenderer content={value} showEmptySlots />
           ) : (
             <p className="text-sm text-neutral-400 text-center py-8">
               Nothing to preview yet. Switch to Edit and write something.
