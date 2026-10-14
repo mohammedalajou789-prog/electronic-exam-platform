@@ -20,7 +20,6 @@ const PAGE_LABELS: Record<string, string> = {
   '/admin/analytics':        'Analytics',
   '/admin/administrators':   'Administrators',
   '/admin/settings':         'Settings',
-  '/admin/images':           'Images',
 }
 
 export default function AdminNavbar({ onToggleSidebar, sidebarCollapsed }: Props) {
