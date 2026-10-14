@@ -6,6 +6,8 @@ import { compareBatches } from '@/lib/batch-order'
 import { Plus, Trash2, ImagePlus, X, Save, CheckCircle } from 'lucide-react'
 import Link from 'next/link'
 import { MnEditor } from '@/components/shared/MnEditor'
+import { uploadStagedImages } from '@/lib/image-upload'
+import { explanationSlots } from '@/lib/question-images'
 
 interface Exam {
   id: string
@@ -47,6 +49,8 @@ interface QuestionForm {
   lecture_id: string
   doctor_id: string
   images: StagedImage[]
+  /** Images for [Image Slot 1-3] in the explanation */
+  slotImages: Partial<Record<1 | 2 | 3, StagedImage>>
 }
 
 function emptyQuestion(): QuestionForm {
@@ -59,7 +63,12 @@ function emptyQuestion(): QuestionForm {
     incorrect_explanation_c: '', incorrect_explanation_d: '',
     chapter_id: '', lecture_id: '', doctor_id: '',
     images: [],
+    slotImages: {},
   }
+}
+
+function stagedSlotFiles(slots: Partial<Record<1 | 2 | 3, StagedImage>>): Partial<Record<1 | 2 | 3, File>> {
+  return { 1: slots[1]?.file, 2: slots[2]?.file, 3: slots[3]?.file }
 }
 
 const choices = ['a', 'b', 'c', 'd', 'e'] as const
@@ -93,6 +102,7 @@ export default function ManualImportPage() {
   const [savedCount, setSavedCount] = useState(0)
   const [isDone, setIsDone] = useState(false)
   const [error, setError] = useState('')
+  const [imageFailures, setImageFailures] = useState<string[]>([])
 
   useEffect(() => {
     async function load() {
@@ -190,25 +200,22 @@ export default function ManualImportPage() {
     }))
   }
 
-  async function uploadImages(questionId: string, images: StagedImage[]) {
-    for (let i = 0; i < images.length; i++) {
-      const img = images[i]
-      const ext = img.file.name.split('.').pop()
-      const fileName = `${questionId}/${Date.now()}-${i}.${ext}`
-      const { error } = await supabase.storage.from('question-images').upload(fileName, img.file)
-      if (error) continue
-      const { data: urlData } = supabase.storage.from('question-images').getPublicUrl(fileName)
-      await supabase.from('question_images').insert({
-        question_id: questionId,
-        image_url: urlData.publicUrl,
-        caption: img.caption.trim() || null,
-        display_order: i + 1,
-      })
-    }
+  function setSlotImage(questionIndex: number, slot: 1 | 2 | 3, file: File | null) {
+    const staged = file ? { file, previewUrl: URL.createObjectURL(file), caption: '' } : null
+    setQuestions(prev => prev.map((q, i) => {
+      if (i !== questionIndex) return q
+      const old = q.slotImages[slot]
+      if (old) URL.revokeObjectURL(old.previewUrl)
+      const slotImages = { ...q.slotImages }
+      if (staged) slotImages[slot] = staged
+      else delete slotImages[slot]
+      return { ...q, slotImages }
+    }))
   }
 
   async function handleSave() {
     setError('')
+    setImageFailures([])
     if (!selectedExam) { setError('Please select an exam first.'); return }
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i]
@@ -227,6 +234,7 @@ export default function ManualImportPage() {
     let saved = 0
     const { data: { user } } = await supabase.auth.getUser()
     const created_by = user?.id ?? null
+    const failedImages: string[] = []
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i]
       const { data: inserted, error: insertError } = await supabase.from('questions').insert({
@@ -250,9 +258,12 @@ export default function ManualImportPage() {
       if (insertError || !inserted) continue
       saved++
       if (q.doctor_id) await supabase.from('exam_doctors').upsert({ exam_id: selectedExam, doctor_id: q.doctor_id })
-      if (q.images.length > 0) await uploadImages(inserted.id, q.images)
+      // Images go to Cloudflare R2 now that the question exists; failures are listed afterwards
+      const failures = await uploadStagedImages(inserted.id, `Question ${i + 1}`, q.images, stagedSlotFiles(q.slotImages), q.explanation)
+      failedImages.push(...failures)
     }
     await supabase.from('exams').update({ question_count: (existingCount || 0) + saved }).eq('id', selectedExam)
+    setImageFailures(failedImages)
     setSavedCount(saved)
     setIsDone(true)
     setIsSaving(false)
@@ -350,8 +361,16 @@ export default function ManualImportPage() {
             <p style={{ margin:'0 0 30px', fontSize:14, color:'var(--mi-muted)' }}>
               Successfully added <strong style={{ color:'var(--mi-fg)' }}>{savedCount}</strong> question{savedCount !== 1 ? 's' : ''} to the exam.
             </p>
+            {imageFailures.length > 0 && (
+              <div style={{ margin:'-12px auto 26px', maxWidth:640, textAlign:'left', background:'var(--mi-rsoft)', color:'var(--mi-red)', border:'1px solid var(--mi-red)', borderRadius:12, padding:'12px 16px', fontSize:13, lineHeight:1.55 }}>
+                <div style={{ fontWeight:800, marginBottom:6 }}>Some images were not saved. Add them later from Exams (open the question):</div>
+                <ul style={{ margin:0, paddingLeft:18 }}>
+                  {imageFailures.map((f, i) => <li key={i}>{f}</li>)}
+                </ul>
+              </div>
+            )}
             <div style={{ display:'flex', justifyContent:'center', gap:10 }}>
-              <button className="mi-btn-ghost" onClick={() => { setQuestions([emptyQuestion()]); setSelectedExam(''); setCurrentSubjectId(''); setFilterYear(''); setFilterSemester(''); setFilterSubject(''); setFilterBatch(''); setExamSearch(''); setExpandedSubject(null); setIsDone(false) }}>
+              <button className="mi-btn-ghost" onClick={() => { setQuestions([emptyQuestion()]); setSelectedExam(''); setCurrentSubjectId(''); setFilterYear(''); setFilterSemester(''); setFilterSubject(''); setFilterBatch(''); setExamSearch(''); setExpandedSubject(null); setImageFailures([]); setIsDone(false) }}>
                 Add More Questions
               </button>
               <Link href="/admin/exams" className="mi-btn-primary">View Exams</Link>
@@ -658,6 +677,30 @@ export default function ManualImportPage() {
                     placeholder="Why is this answer correct? Supports MN Syntax..."
                     minHeight="120px"
                   />
+                  {explanationSlots(q.explanation).length > 0 && (
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:10, marginTop:10 }}>
+                      {explanationSlots(q.explanation).map(n => {
+                        const staged = q.slotImages[n]
+                        return (
+                          <div key={n} style={{ display:'flex', alignItems:'center', gap:10, border:'1px solid var(--mi-bd)', borderRadius:10, padding:'8px 10px', background:'var(--mi-soft)' }}>
+                            {staged
+                              ? <img src={staged.previewUrl} alt={`Image Slot ${n}`} style={{ width:64, height:48, objectFit:'cover', borderRadius:8, border:'1px solid var(--mi-bd)', display:'block' }} />
+                              : <div style={{ width:64, height:48, borderRadius:8, border:'1.5px dashed var(--mi-bd)' }} />}
+                            <span style={{ fontSize:12.5, fontWeight:700 }}>Image Slot {n}</span>
+                            <label style={{ cursor:'pointer', borderRadius:8, border:'1px solid var(--mi-bd)', padding:'5px 10px', fontSize:12, fontWeight:600, color:'var(--mi-muted)', background:'var(--mi-elev)' }}>
+                              {staged ? 'Replace' : 'Choose image'}
+                              <input type="file" accept="image/*" style={{ display:'none' }} onChange={e => { const file = e.target.files?.[0]; if (file) setSlotImage(qIndex, n, file); e.target.value = '' }} />
+                            </label>
+                            {staged && (
+                              <button type="button" onClick={() => setSlotImage(qIndex, n, null)} style={{ border:'none', background:'none', color:'var(--mi-red)', fontSize:12, fontWeight:700, cursor:'pointer' }}>
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 {/* Wrong explanations */}

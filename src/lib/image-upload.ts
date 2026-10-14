@@ -13,6 +13,7 @@
 import {
   MAX_IMAGE_BYTES,
   isImageContentType,
+  explanationSlots,
   type ImageSlot,
 } from '@/lib/question-images'
 
@@ -157,4 +158,47 @@ export async function deleteQuestionImage(imageId: string): Promise<void> {
 /** Saves a new order for the question images of one question. */
 export async function reorderQuestionImages(questionId: string, orderedIds: string[]): Promise<void> {
   await postJson<{ ok: true }>('/api/admin/images/reorder', { questionId, orderedIds })
+}
+
+/** An image chosen in an import screen before the question exists. */
+export interface StagedUpload {
+  file: File
+  caption?: string
+}
+
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : 'The upload failed.'
+}
+
+/**
+ * Uploads the images chosen for a question that was just created (Manual Import and
+ * Bulk Import). Explanation images are uploaded only for the slots that the explanation
+ * text contains. Returns one readable message per image that failed (empty when all
+ * succeeded), so the import screen can list them instead of failing silently.
+ */
+export async function uploadStagedImages(
+  questionId: string,
+  label: string,
+  questionImages: StagedUpload[],
+  explanationImages: Partial<Record<1 | 2 | 3, File>>,
+  explanation: string | null | undefined
+): Promise<string[]> {
+  const failures: string[] = []
+  for (const img of questionImages) {
+    try {
+      await uploadQuestionImage(questionId, 'question', img.file, img.caption?.trim() || null)
+    } catch (err) {
+      failures.push(`${label}, image "${img.file.name}": ${messageOf(err)}`)
+    }
+  }
+  for (const n of explanationSlots(explanation)) {
+    const file = explanationImages[n]
+    if (!file) continue
+    try {
+      await uploadQuestionImage(questionId, `explanation_${n}` as ImageSlot, file)
+    } catch (err) {
+      failures.push(`${label}, explanation image ${n}: ${messageOf(err)}`)
+    }
+  }
+  return failures
 }

@@ -12,8 +12,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { parseMnSyntax } from '@/lib/mn-syntax/parser'
-import { MAX_CAPTION_LENGTH, imageUrl, type ImageSlot } from '@/lib/question-images'
+import { MAX_CAPTION_LENGTH, explanationSlots, imageUrl, type ImageSlot } from '@/lib/question-images'
 import {
   deleteQuestionImage,
   reorderQuestionImages,
@@ -65,15 +64,6 @@ function slotOf(n: SlotNumber): ImageSlot {
   return `explanation_${n}` as ImageSlot
 }
 
-function slotsInText(explanation: string): SlotNumber[] {
-  if (!explanation.trim()) return []
-  const found = new Set<SlotNumber>()
-  for (const token of parseMnSyntax(explanation)) {
-    if (token.type === 'image_slot') found.add(token.slotNumber)
-  }
-  return [...found].sort()
-}
-
 export default function QuestionImagesEditor({ questionId, explanation, onCountChange }: QuestionImagesEditorProps) {
   const [images, setImages] = useState<QuestionImage[] | null>(null)
   const [error, setError] = useState('')
@@ -112,7 +102,7 @@ export default function QuestionImagesEditor({ questionId, explanation, onCountC
     () => (images ?? []).filter(i => i.slot_type === 'question').sort((a, b) => a.display_order - b.display_order),
     [images]
   )
-  const textSlots = useMemo(() => slotsInText(explanation), [explanation])
+  const textSlots = useMemo(() => explanationSlots(explanation), [explanation])
   const shownSlots = useMemo(() => {
     const set = new Set<SlotNumber>(textSlots)
     for (const img of images ?? []) {

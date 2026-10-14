@@ -7,6 +7,7 @@ import { compareBatches } from '@/lib/batch-order'
 import { parseBulkImport, type ParsedQuestion, type ParseError } from '@/features/bulk-import/parser'
 import { ChevronDown, ChevronUp, ImagePlus, X } from 'lucide-react'
 import { ExplanationRenderer } from '@/components/exam/ExplanationRenderer'
+import { uploadStagedImages } from '@/lib/image-upload'
 
 interface Exam {
   id: string
@@ -60,7 +61,8 @@ export default function BulkImportPage() {
   const [validationErrors, setValidationErrors] = useState<string[]>([])
 
   const [stagedImages, setStagedImages] = useState<Record<number, StagedImage[]>>({})
-  const [stagedExplanationImages, setStagedExplanationImages] = useState<Record<number, Record<1|2|3, string|null>>>({})
+  const [stagedExplanationImages, setStagedExplanationImages] = useState<Record<number, Partial<Record<1|2|3, StagedImage>>>>({})
+  const [imageFailures, setImageFailures] = useState<string[]>([])
   const [isImporting, setIsImporting] = useState(false)
   const [importResult, setImportResult] = useState<{ imported: number; errors: number } | null>(null)
   const [expandedQuestions, setExpandedQuestions] = useState<Set<number>>(new Set())
@@ -184,6 +186,7 @@ const [pendingLectureNums, setPendingLectureNums] = useState<{ name: string; num
     setParseWarnings(result.warnings)
     setValidationErrors(dbErrors)
     setStagedImages({})
+    setStagedExplanationImages({})
     setStep('preview')
   }
 
@@ -209,22 +212,28 @@ const [pendingLectureNums, setPendingLectureNums] = useState<{ name: string; num
     })
   }
 
-  async function uploadImagesForQuestion(questionId: string, images: StagedImage[]) {
-    for (let i = 0; i < images.length; i++) {
-      const img = images[i]
-      const ext = img.file.name.split('.').pop()
-      const fileName = `${questionId}/${Date.now()}-${i}.${ext}`
-      const { error } = await supabase.storage.from('question-images').upload(fileName, img.file)
-      if (error) continue
-      const { data: urlData } = supabase.storage.from('question-images').getPublicUrl(fileName)
-      await supabase.from('question_images').insert({ question_id: questionId, image_url: urlData.publicUrl, caption: img.caption.trim() || null, display_order: i + 1 })
-    }
+  function setStagedSlot(questionIndex: number, slot: 1 | 2 | 3, file: File | null) {
+    const staged = file ? { file, previewUrl: URL.createObjectURL(file), caption: '' } : null
+    setStagedExplanationImages(prev => {
+      const current = { ...(prev[questionIndex] ?? {}) }
+      const old = current[slot]
+      if (old) URL.revokeObjectURL(old.previewUrl)
+      if (staged) current[slot] = staged
+      else delete current[slot]
+      return { ...prev, [questionIndex]: current }
+    })
+  }
+
+  /** Question images + explanation images chosen for one question */
+  function stagedCount(questionIndex: number): number {
+    return (stagedImages[questionIndex]?.length || 0) + Object.keys(stagedExplanationImages[questionIndex] ?? {}).length
   }
 
   async function handleImport() {
     if (parseErrors.length > 0 || validationErrors.length > 0) { alert('Please fix all errors before importing.'); return }
     setIsImporting(true)
     let imported = 0; let errors = 0
+    const failedImages: string[] = []
     const { data: { user } } = await supabase.auth.getUser()
     const created_by = user?.id ?? null
     const { count: existingCount } = await supabase
@@ -264,12 +273,17 @@ const [pendingLectureNums, setPendingLectureNums] = useState<{ name: string; num
       }).select('id').single()
       if (error || !inserted) { errors++; continue }
       imported++
-      const images = stagedImages[i] || []
-      if (images.length > 0) await uploadImagesForQuestion(inserted.id, images)
+      // Images go to Cloudflare R2 now that the question exists; failures are listed afterwards
+      const slots = stagedExplanationImages[i] ?? {}
+      failedImages.push(...await uploadStagedImages(
+        inserted.id, `Question ${q.questionNumber}`, stagedImages[i] || [],
+        { 1: slots[1]?.file, 2: slots[2]?.file, 3: slots[3]?.file }, q.explanation
+      ))
       if (doctorId) await supabase.from('exam_doctors').upsert({ exam_id: selectedExam, doctor_id: doctorId })
     }
     await supabase.from('exams').update({ question_count: (existingCount || 0) + imported }).eq('id', selectedExam)
     await supabase.from('bulk_imports').insert({ questions_imported: imported, errors, warnings: parseWarnings.length })
+    setImageFailures(failedImages)
     setImportResult({ imported, errors })
     setStep('done')
     setIsImporting(false)
@@ -936,7 +950,7 @@ QUESTIONS TO CONVERT:
                           <span style={{ fontSize:13.5, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{q.questionText}</span>
                         </div>
                         <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0, marginLeft:12 }}>
-                          {(stagedImages[qIndex]?.length||0)>0 && <span style={{ fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:20, background:'rgba(59,130,246,0.1)', color:'#3b82f6' }}>{stagedImages[qIndex].length} img</span>}
+                          {stagedCount(qIndex)>0 && <span style={{ fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:20, background:'rgba(59,130,246,0.1)', color:'#3b82f6' }}>{stagedCount(qIndex)} img</span>}
                           {q.chapterName && <span style={{ fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:20, background:'var(--bi-psoft)', color:'var(--bi-primary)' }}>{q.chapterName}</span>}
                           {expandedQuestions.has(q.questionNumber) ? <ChevronUp width={15} height={15} style={{ color:'var(--bi-muted)' }}/> : <ChevronDown width={15} height={15} style={{ color:'var(--bi-muted)'}}/>}
                         </div>
@@ -963,27 +977,28 @@ QUESTIONS TO CONVERT:
                             {q.doctorName && <span>Doctor: <strong style={{ color:'var(--bi-fg)' }}>{q.doctorName}</strong></span>}
                           </div>
                           {q.explanation && (() => {
-                            const currentSlotImages = stagedExplanationImages[qIndex] ?? { 1: null, 2: null, 3: null }
+                            const staged = stagedExplanationImages[qIndex] ?? {}
+                            const chosen = ([1, 2, 3] as const).filter(n => staged[n])
                             return (
-                              <ExplanationRenderer
-                                content={q.explanation}
-                                slotImages={currentSlotImages}
-                                onSlotUpload={(slotNumber, file) => {
-                                  const previewUrl = URL.createObjectURL(file)
-                                  setStagedExplanationImages(prev => {
-                                    const updated = {
-                                      ...prev,
-                                      [qIndex]: {
-                                        1: prev[qIndex]?.[1] ?? null,
-                                        2: prev[qIndex]?.[2] ?? null,
-                                        3: prev[qIndex]?.[3] ?? null,
-                                        [slotNumber]: previewUrl,
-                                      }
-                                    }
-                                    return updated
-                                  })
-                                }}
-                              />
+                              <>
+                                <ExplanationRenderer
+                                  content={q.explanation}
+                                  slotImages={{ 1: staged[1]?.previewUrl ?? null, 2: staged[2]?.previewUrl ?? null, 3: staged[3]?.previewUrl ?? null }}
+                                  onSlotUpload={(slotNumber, file) => setStagedSlot(qIndex, slotNumber, file)}
+                                />
+                                {chosen.length > 0 && (
+                                  <div style={{ display:'flex', flexWrap:'wrap', gap:8, fontSize:12.5, color:'var(--bi-muted)' }}>
+                                    {chosen.map(n => (
+                                      <span key={n} style={{ display:'flex', alignItems:'center', gap:6, border:'1px solid var(--bi-bd)', borderRadius:20, padding:'3px 10px', background:'var(--bi-elev)' }}>
+                                        Image Slot {n}: {staged[n]?.file.name}
+                                        <button type="button" onClick={() => setStagedSlot(qIndex, n, null)} style={{ border:'none', background:'none', color:'#ef4444', fontWeight:700, cursor:'pointer', fontSize:12 }}>
+                                          Remove
+                                        </button>
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </>
                             )
                           })()}
                           <div style={{ borderTop:'1px solid var(--bi-bd)', paddingTop:12 }}>
@@ -1038,8 +1053,16 @@ QUESTIONS TO CONVERT:
               Successfully imported <strong style={{ color:'var(--bi-fg)' }}>{importResult.imported}</strong> questions.
               {importResult.errors > 0 && ` ${importResult.errors} questions failed.`}
             </p>
+            {imageFailures.length > 0 && (
+              <div style={{ margin:'-10px auto 24px', maxWidth:640, textAlign:'left', background:'rgba(239,68,68,0.08)', color:'#dc2626', border:'1px solid rgba(239,68,68,0.4)', borderRadius:12, padding:'12px 16px', fontSize:13, lineHeight:1.55 }}>
+                <div style={{ fontWeight:800, marginBottom:6 }}>Some images were not saved. Add them later from Exams (open the question):</div>
+                <ul style={{ margin:0, paddingLeft:18 }}>
+                  {imageFailures.map((f, i) => <li key={i}>{f}</li>)}
+                </ul>
+              </div>
+            )}
             <div style={{ display:'flex', justifyContent:'center', gap:10 }}>
-              <button className="bi-btn-ghost" onClick={() => { setStep('paste'); setRawText(''); setSelectedExam(''); setImportResult(null); setStagedImages({}); setExamInfo(null) }}>
+              <button className="bi-btn-ghost" onClick={() => { setStep('paste'); setRawText(''); setSelectedExam(''); setImportResult(null); setStagedImages({}); setStagedExplanationImages({}); setImageFailures([]); setExamInfo(null) }}>
                 Import More
               </button>
               <Link href="/admin/exams" className="bi-btn-primary">View Exams</Link>

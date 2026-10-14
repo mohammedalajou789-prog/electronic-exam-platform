@@ -11,6 +11,8 @@
 // The public address is NEXT_PUBLIC_IMAGES_BASE_URL + '/' + key. Moving to a custom
 // domain only changes that variable (in .env.local and Vercel), then a rebuild.
 
+import { parseMnSyntax } from '@/lib/mn-syntax/parser'
+
 export type ImageSlot = 'question' | 'explanation_1' | 'explanation_2' | 'explanation_3'
 
 export const IMAGE_SLOTS: readonly ImageSlot[] = ['question', 'explanation_1', 'explanation_2', 'explanation_3']
@@ -59,6 +61,16 @@ export function isStorageKeyFor(key: unknown, questionId: string, slot: ImageSlo
   if (typeof key !== 'string') return false
   const match = KEY_PATTERN.exec(key)
   return match !== null && match[1] === slotPrefix(slot) && match[2] === questionId.toLowerCase()
+}
+
+/** The explanation slots ([Image Slot 1-3]) written in an explanation text, in order. */
+export function explanationSlots(explanation: string | null | undefined): (1 | 2 | 3)[] {
+  if (!explanation || !explanation.trim()) return []
+  const found = new Set<1 | 2 | 3>()
+  for (const token of parseMnSyntax(explanation)) {
+    if (token.type === 'image_slot') found.add(token.slotNumber)
+  }
+  return [...found].sort()
 }
 
 /** The public address of an image. */

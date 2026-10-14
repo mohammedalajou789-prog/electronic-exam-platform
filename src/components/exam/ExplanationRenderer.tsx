@@ -5,7 +5,7 @@
 
 'use client';
 
-import Image from 'next/image';
+import { useId } from 'react';
 import { parseMnSyntax, parseInline, type MnToken, type MnInlineToken } from '@/lib/mn-syntax/parser';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -110,12 +110,15 @@ function BlockToken({
   accentDark,
   borderColor,
   onSlotUpload,
+  inputIdPrefix,
 }: {
   token: MnToken;
   slotImages: Record<1 | 2 | 3, string | null>;
   accentDark: string;
   borderColor: string;
   onSlotUpload?: (slotNumber: 1 | 2 | 3, file: File) => void;
+  /** Makes the file input id unique when several explanations are on one page */
+  inputIdPrefix: string;
 }) {
   switch (token.type) {
 case 'list':
@@ -182,12 +185,11 @@ case 'list':
       if (imageUrl) {
         return (
           <div style={{ margin: '16px 0', borderRadius: '14px', overflow: 'hidden' }}>
-            <Image
+            <img
               src={imageUrl}
               alt={`Explanation image ${slotNum}`}
-              width={720}
-              height={400}
-              style={{ width: '100%', height: 'auto', objectFit: 'contain' }}
+              loading="lazy"
+              style={{ width: '100%', height: 'auto', objectFit: 'contain', display: 'block' }}
             />
           </div>
         );
@@ -195,19 +197,21 @@ case 'list':
 
       return (
         <>
-          <input
-            type="file"
-            accept="image/*"
-            id={`slot-upload-${slotNum}`}
-            style={{ display: 'none' }}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file && onSlotUpload) onSlotUpload(slotNum, file);
-              e.target.value = '';
-            }}
-          />
+          {onSlotUpload && (
+            <input
+              type="file"
+              accept="image/*"
+              id={`${inputIdPrefix}-slot-${slotNum}`}
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file && onSlotUpload) onSlotUpload(slotNum, file);
+                e.target.value = '';
+              }}
+            />
+          )}
           <label
-            htmlFor={`slot-upload-${slotNum}`}
+            htmlFor={onSlotUpload ? `${inputIdPrefix}-slot-${slotNum}` : undefined}
             style={{
               display: 'flex',
               flexDirection: 'column',
@@ -322,6 +326,7 @@ export function ExplanationRenderer({
   slotImages = { 1: null, 2: null, 3: null },
   onSlotUpload,
 }: ExplanationRendererProps) {
+  const inputIdPrefix = useId();
 
   // Design tokens — matches the sage palette from your HTML file
   const accentDark = 'oklch(38% 0.06 150)';
@@ -405,6 +410,7 @@ export function ExplanationRenderer({
           accentDark={accentDark}
           borderColor={borderColor}
           onSlotUpload={onSlotUpload}
+          inputIdPrefix={inputIdPrefix}
         />
       ))}
     </div>
